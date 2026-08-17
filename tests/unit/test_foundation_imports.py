@@ -15,7 +15,7 @@ def test_import_origlyph_succeeds() -> None:
 def test_origlyph_version() -> None:
     """``origlyph`` exposes the canonical foundation version."""
     module = importlib.import_module("origlyph")
-    assert module.__version__ == "0.1.0"
+    assert module.__version__ == "0.1.0a1"
 
 
 @pytest.mark.parametrize(

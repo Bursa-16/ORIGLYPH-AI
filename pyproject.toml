@@ -1,6 +1,6 @@
 [project]
 name = "origlyph"
-version = "0.1.0"
+version = "0.1.0a1"
 description = "Origlyph Engineering Platform for CAD data opening, geometry interrogation, GD&T, and tolerance analysis"
 requires-python = ">=3.10"
 license = "MIT"

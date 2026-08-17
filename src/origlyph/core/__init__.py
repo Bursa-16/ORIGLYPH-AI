@@ -1,0 +1,1 @@
+"""Origlyph core package."""

@@ -1,0 +1,44 @@
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# pytest / type / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyright/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Environment / secrets
+.env
+.env.*
+
+# IDE / editor
+.vscode/
+.idea/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Future Node artifacts
+node_modules/
+
+# Local datasets / generated CAD or cache artifacts
+data/local/
+datasets/
+*.cache
+*.tmp

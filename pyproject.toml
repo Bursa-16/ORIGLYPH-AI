@@ -1,0 +1,26 @@
+[project]
+name = "origlyph"
+version = "0.1.0"
+description = "Origlyph Engineering Platform for CAD data opening, geometry interrogation, GD&T, and tolerance analysis"
+requires-python = ">=3.10"
+license = "MIT"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+    "pyright",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_classes = []
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "A", "C", "N", "T"]
+
+[tool.pyright]
+pythonVersion = "3.10"

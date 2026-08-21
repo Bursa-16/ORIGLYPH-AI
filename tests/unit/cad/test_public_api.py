@@ -4,6 +4,9 @@ import importlib
 import origlyph.cad as cad_module
 
 EXPECTED_EXPORTS = {
+    "BoundReference",
+    "bind_reference",
+    "bind_references",
     "CadFormat",
     "CadImporter",
     "CadImportError",

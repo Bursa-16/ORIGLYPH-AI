@@ -32,8 +32,16 @@ from .model import (
     SourceToNeutralMapping,
     UnsupportedContent,
 )
+from .binding import (
+    BoundReference,
+    bind_reference,
+    bind_references,
+)
 
 __all__ = [
+    "BoundReference",
+    "bind_reference",
+    "bind_references",
     "CadFormat",
     "CadImporter",
     "CadImportError",

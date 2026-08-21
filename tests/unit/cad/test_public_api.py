@@ -7,6 +7,7 @@ EXPECTED_EXPORTS = {
     "BoundReference",
     "bind_reference",
     "bind_references",
+    "bind_datum_constraint",
     "CadFormat",
     "CadImporter",
     "CadImportError",

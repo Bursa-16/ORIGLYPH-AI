@@ -37,11 +37,13 @@ from .model import (
     SourceToNeutralMapping,
     UnsupportedContent,
 )
+from .role import bind_datum_constraint
 
 __all__ = [
     "BoundReference",
     "bind_reference",
     "bind_references",
+    "bind_datum_constraint",
     "CadFormat",
     "CadImporter",
     "CadImportError",

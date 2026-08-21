@@ -6,6 +6,11 @@ importer abstraction. Deliberately dependency-free beyond ``origlyph.geometry``
 value contracts. Kernel abstraction is deferred to a later stage.
 """
 
+from .binding import (
+    BoundReference,
+    bind_reference,
+    bind_references,
+)
 from .exceptions import (
     CadImportError,
     DuplicateNeutralEntityError,
@@ -31,11 +36,6 @@ from .model import (
     NeutralModel,
     SourceToNeutralMapping,
     UnsupportedContent,
-)
-from .binding import (
-    BoundReference,
-    bind_reference,
-    bind_references,
 )
 
 __all__ = [

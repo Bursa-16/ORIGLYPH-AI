@@ -16,8 +16,8 @@ from origlyph.cad import (
     SourceEntityIdentity,
     SourceUnitSystem,
 )
-from origlyph.cad.bridge import BridgedCandidate, extract_candidates
 from origlyph.cad.binding import BoundReference, bind_reference, bind_references
+from origlyph.cad.bridge import BridgedCandidate, extract_candidates
 from origlyph.cad.identity import NeutralEntityIdentity
 from origlyph.cad.model import NeutralEntityEntry, NeutralModel, SourceToNeutralMapping
 from origlyph.datum import (
@@ -54,7 +54,12 @@ def _source(key: str) -> SourceEntityIdentity:
     return SourceEntityIdentity(source_document=_doc(), source_entity_key=key)
 
 
-def _neutral(key: str, kind: NeutralEntityKind, *, source: bool = True) -> NeutralEntityIdentity:
+def _neutral(
+    key: str,
+    kind: NeutralEntityKind,
+    *,
+    source: bool = True,
+) -> NeutralEntityIdentity:
     return NeutralEntityIdentity(
         neutral_entity_key=key,
         kind=kind,

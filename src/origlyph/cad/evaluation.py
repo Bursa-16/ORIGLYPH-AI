@@ -56,6 +56,15 @@ class CandidateEvaluation:
         makes POINT/PLANE/AXIS ineligible for a role.
     validation
         Existing :class:`~origlyph.datum.ValidationState` for the evaluation.
+        ``validation == ValidationState.PASS`` means only: *"the
+        deterministic candidate-evaluation rules completed successfully for
+        this validated binding."*
+
+        ``PASS`` does **not** mean engineer approval, datum selected, datum
+        assigned, preferred candidate, ranking, recommendation acceptance,
+        or DRF acceptance. Those are separate, explicitly later actions.
+        Evidence completeness is reported separately via ``confidence``;
+        admissibility via ``eligible``.
     confidence
         Strength of the deterministic evidence: MEDIUM when the binding
         carries a source identity, LOW when provenance is absent. HIGH is

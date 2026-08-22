@@ -16,6 +16,36 @@ from .datum_reference_frame import ConstrainedResult, DatumConstraint
 
 
 class ValidationState(str, Enum):
+    """Advisory validation state for descriptor/recommendation records.
+
+    Used by :class:`DatumRecommendation.validation` and
+    :class:`~origlyph.cad.evaluation.CandidateEvaluation.validation`.
+
+    Meanings (locked by the Stage 4F contract)::
+
+        UNVALIDATED
+            No advisory validation step has yet been applied.
+        PASS
+            The applicable deterministic validation/evaluation step
+            completed successfully. It is **not** recommendation
+            acceptance; engineer acceptance remains a later action.
+        FAIL
+            Represents a failed advisory validation result when such a path
+            exists. Candidate evaluation does not currently emit FAIL.
+
+    IMPORTANT — ``PASS`` does **not** mean any of:
+
+    * engineer approval;
+    * datum assignment;
+    * recommendation acceptance;
+    * structural validity of a ``BoundReference`` (owned by Stage 1/2
+      binding and coherence validation);
+    * DRF acceptance.
+
+    ``PASS`` only reports completion of the applicable deterministic step.
+    Engineer acceptance remains a separate, explicit, later action.
+    """
+
     UNVALIDATED = "unvalidated"
     PASS = "pass"
     FAIL = "fail"

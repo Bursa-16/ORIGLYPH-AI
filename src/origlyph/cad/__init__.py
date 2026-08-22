@@ -11,6 +11,10 @@ from .binding import (
     bind_reference,
     bind_references,
 )
+from .evaluation import (
+    CandidateEvaluation,
+    evaluate_candidates,
+)
 from .exceptions import (
     CadImportError,
     DuplicateNeutralEntityError,
@@ -48,10 +52,12 @@ __all__ = [
     "bind_references",
     "bind_datum_constraint",
     "bind_datum_reference_frame",
+    "evaluate_candidates",
     "CadFormat",
     "CadImporter",
     "CadImportError",
     "CadWarning",
+    "CandidateEvaluation",
     "DomainIdentity",
     "DuplicateNeutralEntityError",
     "DuplicateSourceEntityError",

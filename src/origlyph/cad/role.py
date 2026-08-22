@@ -19,10 +19,13 @@ needs none.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from origlyph.cad.binding import BoundReference
 from origlyph.datum import (
     ConstraintType,
     DatumConstraint,
+    DatumReferenceFrame,
     DegreesOfFreedom,
     PhysicalFeature,
     Simulator,
@@ -33,6 +36,7 @@ from origlyph.datum import (
 
 __all__ = [
     "bind_datum_constraint",
+    "bind_datum_reference_frame",
 ]
 
 # Explicit, deterministic, non-inferred mapping of engineering role to the
@@ -105,4 +109,96 @@ def bind_datum_constraint(
         datum_feature=datum_feature,
         theoretical=theoretical,
         dof=dof,
+    )
+
+
+def bind_datum_reference_frame(
+    name: str,
+    assignments: Sequence[tuple[BoundReference, ConstraintType]],
+    *,
+    simulator: Simulator = default_simulator,
+) -> DatumReferenceFrame:
+    """Assemble explicit role assignments into a validated DRF.
+
+    Converts ``(BoundReference, ConstraintType)`` assignments into
+    :class:`~origlyph.datum.DatumConstraint` objects through
+    :func:`bind_datum_constraint`, orders the constraints deterministically
+    by their resulting ``sequence``, and delegates every cross-constraint
+    rule (non-empty, contiguity, duplicate sequence, duplicate feature, DOF
+    overlap) to the existing :class:`~origlyph.datum.DatumReferenceFrame`.
+
+    The single ordering authority is the produced
+    ``DatumConstraint.sequence`` — never the input order and never a second
+    role→sequence map. Input order is irrelevant on success paths: unordered
+    assignments such as SECONDARY, PRIMARY, TERTIARY yield constraints
+    ordered 1, 2, 3. This is ordering only; roles come exclusively from the
+    explicit assignments.
+
+    Parameters
+    ----------
+    name
+        Verbatim frame name. Never normalized, stripped, or rejected beyond
+        requiring ``str`` (existing ``DatumReferenceFrame`` imposes no name
+        semantics).
+    assignments
+        Explicit assignments; every item is exactly a
+        ``(bound_reference, constraint_type)`` pair. Any prefix that starts
+        with PRIMARY yields a valid partial frame; gaps, duplicates, and
+        over-constraining fail through existing domain validation.
+    simulator
+        One shared deterministic simulator applied to every assignment
+        (:func:`~origlyph.datum.default_simulator` by default). Its
+        exceptions propagate unchanged.
+
+    Returns
+    -------
+    DatumReferenceFrame
+        A validated frame. Provenance-free by design: callers retain the
+        original :class:`BoundReference` objects and associate them with the
+        resulting constraints through ``entity_id``.
+
+    Raises
+    ------
+    TypeError
+        If ``name`` is not ``str``, ``assignments`` is not a ``Sequence``,
+        or an item is not exactly a 2-tuple.
+    ValueError
+        Propagated unchanged from existing validation: element types and
+        simulator output (via :func:`bind_datum_constraint`) and the
+        empty/duplicate/gap/overlap rules (via
+        :class:`~origlyph.datum.DatumReferenceFrame`).
+    """
+    if not isinstance(name, str):
+        raise TypeError("bind_datum_reference_frame requires a string name")
+    if not isinstance(assignments, Sequence):
+        raise TypeError(
+            "bind_datum_reference_frame requires a sequence of assignments"
+        )
+
+    constraints: list[DatumConstraint] = []
+    for item in assignments:
+        if not isinstance(item, tuple) or len(item) != 2:
+            raise TypeError(
+                "each assignment must be a "
+                "(bound_reference, constraint_type) tuple"
+            )
+        bound_reference, constraint_type = item
+        constraints.append(
+            bind_datum_constraint(
+                bound_reference,
+                constraint_type,
+                simulator=simulator,
+            )
+        )
+
+    ordered = tuple(
+        sorted(
+            constraints,
+            key=lambda constraint: constraint.sequence,
+        )
+    )
+
+    return DatumReferenceFrame(
+        name=name,
+        constraints=ordered,
     )

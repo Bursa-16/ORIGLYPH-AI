@@ -4,6 +4,7 @@ Exposes only the approved public geometry API. Pure value objects carry no
 provenance, source IDs, or unit metadata.
 """
 
+from .bounded import BoundedPlanarFace
 from .exceptions import (
     InvalidGeometryError,
     OriglyphGeometryError,
@@ -30,6 +31,7 @@ from .units import Angle, Length, as_angle, as_length
 
 __all__ = [
     "Angle",
+    "BoundedPlanarFace",
     "Frame",
     "GeometryTolerancePolicy",
     "InvalidGeometryError",

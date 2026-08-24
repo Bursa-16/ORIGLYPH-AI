@@ -14,6 +14,9 @@ from .binding import (
 from .context import (
     FunctionalRelevanceDeclaration,
 )
+from .drawing_context import (
+    DatumFeatureDeclaration,
+)
 from .evaluation import (
     CandidateEvaluation,
     evaluate_candidates,
@@ -61,6 +64,7 @@ __all__ = [
     "CadImportError",
     "CadWarning",
     "CandidateEvaluation",
+    "DatumFeatureDeclaration",
     "DomainIdentity",
     "DuplicateNeutralEntityError",
     "DuplicateSourceEntityError",

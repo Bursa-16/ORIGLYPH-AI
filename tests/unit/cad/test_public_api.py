@@ -15,6 +15,7 @@ EXPECTED_EXPORTS = {
     "CadImportError",
     "CadWarning",
     "CandidateEvaluation",
+    "DatumFeatureDeclaration",
     "DomainIdentity",
     "DuplicateNeutralEntityError",
     "DuplicateSourceEntityError",

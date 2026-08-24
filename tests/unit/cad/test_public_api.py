@@ -18,6 +18,7 @@ EXPECTED_EXPORTS = {
     "DomainIdentity",
     "DuplicateNeutralEntityError",
     "DuplicateSourceEntityError",
+    "FunctionalRelevanceDeclaration",
     "InvalidSourceIdentityError",
     "NeutralEntityEntry",
     "NeutralEntityIdentity",

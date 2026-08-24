@@ -11,6 +11,9 @@ from .binding import (
     bind_reference,
     bind_references,
 )
+from .context import (
+    FunctionalRelevanceDeclaration,
+)
 from .evaluation import (
     CandidateEvaluation,
     evaluate_candidates,
@@ -61,6 +64,7 @@ __all__ = [
     "DomainIdentity",
     "DuplicateNeutralEntityError",
     "DuplicateSourceEntityError",
+    "FunctionalRelevanceDeclaration",
     "InvalidSourceIdentityError",
     "NeutralEntityEntry",
     "NeutralEntityIdentity",

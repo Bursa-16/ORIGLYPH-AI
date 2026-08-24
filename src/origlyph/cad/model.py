@@ -15,7 +15,14 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Mapping, Optional
 
-from origlyph.geometry import Frame, Line3D, Plane3D, Point3D, Vector3D
+from origlyph.geometry import (
+    BoundedPlanarFace,
+    Frame,
+    Line3D,
+    Plane3D,
+    Point3D,
+    Vector3D,
+)
 
 from .exceptions import (
     DuplicateNeutralEntityError,
@@ -37,7 +44,8 @@ __all__ = [
 ]
 
 # Existing Origlyph canonical geometry value objects that an entity entry may
-# carry in Stage 1C. CURVE/SURFACE/SOLID/INSTANCE etc. carry identity only.
+# carry. Since Stage 5G the accepted set also includes the bounded planar face
+# (finite extent). CURVE/SURFACE/SOLID/INSTANCE etc. carry identity only.
 GeometryValue = object
 
 _DEFAULT_METADATA: Mapping[str, object] = MappingProxyType({})
@@ -48,8 +56,9 @@ _DEFAULT_PATH: tuple[str, ...] = ()
 class NeutralEntityEntry:
     """One neutral imported entity: identity + optional canonical geometry.
 
-    ``geometry`` is limited to existing ``origlyph.geometry`` value objects or
-    ``None``. No new primitives, no B-Rep, no topology, no kernel handle is
+    ``geometry`` is limited to existing ``origlyph.geometry`` value objects
+    (the canonical primitives plus, since Stage 5G, the bounded planar face)
+    or ``None``. No new primitives, no B-Rep, no topology, no kernel handle is
     introduced. ``metadata`` is exposed read-only.
     """
 
@@ -61,7 +70,7 @@ class NeutralEntityEntry:
     def __post_init__(self) -> None:
         if self.geometry is not None and not isinstance(
             self.geometry,
-            (Point3D, Vector3D, Line3D, Plane3D),
+            (BoundedPlanarFace, Point3D, Vector3D, Line3D, Plane3D),
         ):
             raise TypeError(
                 "neutral entity geometry must be an existing Origlyph "

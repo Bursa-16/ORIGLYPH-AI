@@ -18,7 +18,14 @@ from origlyph.cad import (
     SourceUnitSystem,
     UnsupportedContent,
 )
-from origlyph.geometry import Frame, Line3D, Plane3D, Point3D, Vector3D
+from origlyph.geometry import (
+    BoundedPlanarFace,
+    Frame,
+    Line3D,
+    Plane3D,
+    Point3D,
+    Vector3D,
+)
 
 
 def _source_document() -> SourceDocumentIdentity:
@@ -181,6 +188,104 @@ def test_model_retains_unsupported_content() -> None:
 def test_model_entities_are_a_fixed_tuple() -> None:
     model = _model()
     assert isinstance(model.entities, tuple)
+def _square_face() -> BoundedPlanarFace:
+    return BoundedPlanarFace(
+        vertices=(
+            Point3D(0.0, 0.0, 0.0),
+            Point3D(10.0, 0.0, 0.0),
+            Point3D(10.0, 20.0, 0.0),
+            Point3D(0.0, 20.0, 0.0),
+        )
+    )
+
+
+def _surface_identity(
+    key: str,
+    *,
+    source: SourceEntityIdentity | None = None,
+    generated: bool = False,
+) -> NeutralEntityIdentity:
+    return NeutralEntityIdentity(
+        neutral_entity_key=key,
+        kind=NeutralEntityKind.SURFACE,
+        source_identity=source,
+        generated=generated,
+    )
+
+
+def test_entry_carries_bounded_planar_face() -> None:
+    face = _square_face()
+    entry = _entry(geometry=face)
+    assert entry.geometry == face
+
+
+def test_entry_retains_face_object_verbatim() -> None:
+    face = _square_face()
+    entry = NeutralEntityEntry(
+        identity=_surface_identity("face-1", source=_source_entity()),
+        geometry=face,
+    )
+    assert entry.geometry is face
+
+
+def test_source_provenance_reachable_through_face_entry() -> None:
+    source = _source_entity(key="slab-face-7")
+    entry = NeutralEntityEntry(
+        identity=_surface_identity("n-face", source=source),
+        geometry=_square_face(),
+    )
+    linked = entry.identity.source_identity
+    assert linked is not None
+    assert linked is source
+    assert linked.source_document.source_id == "doc-1"
+
+
+def test_generated_identity_may_carry_bounded_face() -> None:
+    entry = NeutralEntityEntry(
+        identity=_surface_identity("gen-face", generated=True),
+        geometry=_square_face(),
+    )
+    assert entry.identity.generated is True
+    assert entry.identity.source_identity is None
+    assert isinstance(entry.geometry, BoundedPlanarFace)
+
+
+def test_same_geometry_different_identities_remain_distinct_entries() -> None:
+    face = _square_face()
+    first = NeutralEntityEntry(
+        identity=_surface_identity("face-a", source=_source_entity(key="a")),
+        geometry=face,
+    )
+    second = NeutralEntityEntry(
+        identity=_surface_identity("face-b", source=_source_entity(key="b")),
+        geometry=face,
+    )
+    assert first.geometry == second.geometry
+    assert first != second
+    assert first.identity != second.identity
+
+
+def test_arbitrary_payload_remains_rejected_after_widening() -> None:
+    with pytest.raises(TypeError):
+        _entry(geometry=object())  # type: ignore[arg-type]
+
+
+def test_face_bearing_entry_without_coordinate_frame_is_legal() -> None:
+    entry = NeutralEntityEntry(
+        identity=_surface_identity("face-noframe", source=_source_entity()),
+        geometry=_square_face(),
+    )
+    assert entry.coordinate_frame is None
+
+
+def test_model_lookup_returns_face_bearing_entry() -> None:
+    identity = _surface_identity("n-face", source=_source_entity())
+    entry = NeutralEntityEntry(identity=identity, geometry=_square_face())
+    model = _model(entities=[entry])
+    found = model.entity_by_identity(identity)
+    assert found is not None
+    assert found is entry
+    assert isinstance(found.geometry, BoundedPlanarFace)
     assert len(model.entities) == 1
 
 

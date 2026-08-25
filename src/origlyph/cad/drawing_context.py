@@ -21,11 +21,15 @@ exists.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from .identity import SourceEntityIdentity
 
-__all__ = ["DatumFeatureDeclaration"]
+__all__ = [
+    "DatumFeatureDeclaration",
+    "DrawingDatumReferenceFrameDeclaration",
+]
 
 
 @dataclass(frozen=True)
@@ -81,3 +85,59 @@ def _normalized_optional_text(value: object, field_name: str) -> str | None:
         raise TypeError(f"{field_name} must be a string or None")
     stripped = value.strip()
     return stripped if stripped else None
+@dataclass(frozen=True)
+class DrawingDatumReferenceFrameDeclaration:
+    """An attributed drawing/source datum-reference callout.
+
+    Stored state is exactly ``(labels, transcriber, drawing_reference,
+    location)``. ``labels`` is an ordered tuple of unresolved datum-feature
+    labels in drawing-callout precedence order ONLY. The record does not
+    imply PRIMARY/SECONDARY/TERTIARY, any ConstraintType, resolution,
+    binding, a DatumConstraint, a DatumReferenceFrame, ranking, scoring,
+    selection, acceptance, or ASME/ISO interpretation. It carries no
+    source-entity identity and does not embed a
+    :class:`DatumFeatureDeclaration`.
+    """
+
+    labels: tuple[str, ...]
+    transcriber: str
+    drawing_reference: str
+    location: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "labels", _normalized_labels(self.labels))
+        object.__setattr__(
+            self,
+            "transcriber",
+            _normalized_required_text(self.transcriber, "transcriber"),
+        )
+        object.__setattr__(
+            self,
+            "drawing_reference",
+            _normalized_required_text(self.drawing_reference, "drawing_reference"),
+        )
+        object.__setattr__(
+            self, "location", _normalized_optional_text(self.location, "location")
+        )
+
+
+def _normalized_labels(value: object) -> tuple[str, ...]:
+    """Normalize ``value`` to a non-empty tuple of non-blank stripped strings.
+
+    A concrete sequence (tuple/list) is required; a generic iterator and any
+    string are rejected. Order, case, duplicates, and internal content are
+    preserved verbatim. No sorting, deduplication, or uppercasing occurs.
+    """
+    if isinstance(value, str) or not isinstance(value, Sequence):
+        raise TypeError("labels must be a concrete sequence of strings")
+    if len(value) == 0:
+        raise ValueError("labels must contain at least one label")
+    normalized: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise TypeError("labels items must be strings")
+        stripped = item.strip()
+        if not stripped:
+            raise ValueError("labels items must not be blank")
+        normalized.append(stripped)
+    return tuple(normalized)

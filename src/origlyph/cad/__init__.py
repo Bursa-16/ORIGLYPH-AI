@@ -16,6 +16,7 @@ from .context import (
 )
 from .drawing_context import (
     DatumFeatureDeclaration,
+    DrawingDatumReferenceFrameDeclaration,
 )
 from .evaluation import (
     CandidateEvaluation,
@@ -66,6 +67,7 @@ __all__ = [
     "CandidateEvaluation",
     "DatumFeatureDeclaration",
     "DomainIdentity",
+    "DrawingDatumReferenceFrameDeclaration",
     "DuplicateNeutralEntityError",
     "DuplicateSourceEntityError",
     "FunctionalRelevanceDeclaration",

@@ -17,6 +17,7 @@ from origlyph.cad import (
     CadFormat,
     DatumFeatureDeclaration,
     DomainIdentity,
+    DrawingDatumReferenceFrameDeclaration,
     FunctionalRelevanceDeclaration,
     NeutralEntityIdentity,
     NeutralEntityKind,
@@ -267,3 +268,202 @@ def test_coexistence_with_functional_declaration() -> None:
     )
     assert datum_feature.target is functional.target is target
     assert datum_feature != functional
+# ---------------------------------------------------------------------------
+# Stage 9C — DrawingDatumReferenceFrameDeclaration (test-first)
+#
+# An attributed drawing/source datum-reference callout carrying ordered,
+# unresolved labels plus drawing provenance only. Tuple order means
+# drawing-callout precedence ONLY; it must never imply
+# PRIMARY/SECONDARY/TERTIARY, ConstraintType, resolution, binding,
+# DatumConstraint, DatumReferenceFrame, ranking, scoring, or acceptance.
+# ---------------------------------------------------------------------------
+
+
+def _drf(**overrides) -> DrawingDatumReferenceFrameDeclaration:
+    values = {
+        "labels": ("A", "B", "C"),
+        "transcriber": "engineer:j.doe",
+        "drawing_reference": "DWG-100 rev B",
+        "location": None,
+    }
+    values.update(overrides)
+    return DrawingDatumReferenceFrameDeclaration(**values)
+
+
+def test_drf_valid_single_label() -> None:
+    declaration = _drf(labels=("A",))
+    assert declaration.labels == ("A",)
+
+
+def test_drf_valid_multiple_labels() -> None:
+    declaration = _drf()
+    assert declaration.labels == ("A", "B", "C")
+
+
+def test_drf_field_names_and_order_exact() -> None:
+    names = [field.name for field in dataclasses.fields(_drf())]
+    assert names == [
+        "labels",
+        "transcriber",
+        "drawing_reference",
+        "location",
+    ]
+
+
+def test_drf_labels_stored_as_tuple() -> None:
+    assert isinstance(_drf().labels, tuple)
+
+
+def test_drf_list_normalized_to_tuple() -> None:
+    declaration = _drf(labels=["A", "B"])
+    assert isinstance(declaration.labels, tuple)
+    assert declaration.labels == ("A", "B")
+
+
+def test_drf_generator_rejected() -> None:
+    with pytest.raises(TypeError):
+        _drf(labels=iter(("A", "B")))  # type: ignore[arg-type]
+
+
+def test_drf_empty_labels_rejected() -> None:
+    with pytest.raises(ValueError):
+        _drf(labels=())
+
+
+def test_drf_non_string_label_rejected() -> None:
+    with pytest.raises(TypeError):
+        _drf(labels=("A", 7))  # type: ignore[arg-type]
+
+
+def test_drf_labels_stripped() -> None:
+    declaration = _drf(labels=("  A  ", " B "))
+    assert declaration.labels == ("A", "B")
+
+
+def test_drf_blank_label_rejected() -> None:
+    with pytest.raises(ValueError):
+        _drf(labels=("A", "   "))
+
+
+def test_drf_label_case_preserved() -> None:
+    declaration = _drf(labels=("aBc", "D"))
+    assert declaration.labels == ("aBc", "D")
+
+def test_drf_internal_label_content_preserved() -> None:
+    declaration = _drf(labels=("A-B", "C"))
+    assert declaration.labels == ("A-B", "C")
+
+
+def test_drf_label_order_preserved() -> None:
+    declaration = _drf(labels=("C", "A", "B"))
+    assert declaration.labels == ("C", "A", "B")
+
+
+def test_drf_duplicate_labels_preserved() -> None:
+    declaration = _drf(labels=("A", "A", "B"))
+    assert declaration.labels == ("A", "A", "B")
+
+
+def test_drf_transcriber_must_be_string() -> None:
+    with pytest.raises(TypeError):
+        _drf(transcriber=42)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        _drf(transcriber="   ")
+
+
+def test_drf_drawing_reference_must_be_string() -> None:
+    with pytest.raises(TypeError):
+        _drf(drawing_reference=42)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        _drf(drawing_reference="   ")
+
+
+def test_drf_location_normalization() -> None:
+    assert _drf(location=None).location is None
+    assert _drf(location="  flat  ").location == "flat"
+    assert _drf(location="   ").location is None
+    with pytest.raises(TypeError):
+        _drf(location=7)  # type: ignore[arg-type]
+
+
+def test_drf_frozen_immutability() -> None:
+    declaration = _drf()
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        setattr(declaration, "labels", ("X",))  # noqa: B010
+
+
+def test_drf_value_equality_and_hash() -> None:
+    first = _drf()
+    second = _drf()
+    assert first == second
+    assert hash(first) == hash(second)
+
+
+def test_drf_reversed_labels_unequal() -> None:
+    assert _drf(labels=("A", "B")) != _drf(labels=("B", "A"))
+def test_drf_forbidden_semantic_fields_absent() -> None:
+    names = {field.name for field in dataclasses.fields(_drf())}
+    assert names == {
+        "labels",
+        "transcriber",
+        "drawing_reference",
+        "location",
+    }
+    declaration = _drf()
+    for forbidden in (
+        "target",
+        "kind",
+        "sequence",
+        "role",
+        "constraint_type",
+        "primary",
+        "secondary",
+        "tertiary",
+        "score",
+        "rank",
+        "confidence",
+        "eligible",
+        "acceptance",
+    ):
+        assert not hasattr(declaration, forbidden)
+
+
+def test_drf_no_source_entity_identity_stored() -> None:
+    declaration = _drf()
+    assert not hasattr(declaration, "target")
+    assert not hasattr(declaration, "source_identity")
+
+
+def test_drf_no_datum_binding_role_evaluation_imports() -> None:
+    source = inspect.getsource(drawing_context_module)
+    tree = ast.parse(source)
+    collected: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            collected.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            collected.add(node.attr)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            collected.add(module)
+            collected.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.Import):
+            collected.update(alias.name for alias in node.names)
+    forbidden = {
+        "BoundReference",
+        "ConstraintType",
+        "DatumConstraint",
+        "DatumReferenceFrame",
+        "origlyph.datum",
+        "datum",
+        "binding",
+        "role",
+        "evaluation",
+        "resolver",
+        "parser",
+        "OCR",
+        "PMI",
+        "rank",
+        "score",
+    }
+    assert not collected & forbidden

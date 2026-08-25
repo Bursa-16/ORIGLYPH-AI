@@ -17,6 +17,7 @@ EXPECTED_EXPORTS = {
     "CandidateEvaluation",
     "DatumFeatureDeclaration",
     "DomainIdentity",
+    "DrawingDatumReferenceFrameDeclaration",
     "DuplicateNeutralEntityError",
     "DuplicateSourceEntityError",
     "FunctionalRelevanceDeclaration",

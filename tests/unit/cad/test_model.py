@@ -293,3 +293,142 @@ def test_model_has_no_topology_tree() -> None:
     model = _model()
     for name in ("topology", "brep_kernel", "b_rep"):
         assert not hasattr(model, name)
+
+
+# ---------------------------------------------------------------------------
+# Stage 10P — model-scoped source-identity reverse lookup.
+# ---------------------------------------------------------------------------
+# Contract: `NeutralModel.reverse_lookup(source)` returns the *neutral identity*
+# mapped from the exact `SourceEntityIdentity` within ONE NeutralModel snapshot.
+# - exact identity comparison only; deterministic; model-local;
+# - fail closed on NO match;
+# - ambiguity (>1) is structurally impossible: SourceToNeutralMapping rejects
+#   duplicate source keys and duplicate neutral identities at construction.
+# No geometry, binding, ConstraintType, role, DatumConstraint/DRF, standards,
+# fingerprint/revision, AI/heuristic, or cross-model behavior is introduced.
+
+
+def _other_source_document() -> SourceDocumentIdentity:
+    return SourceDocumentIdentity(
+        source_id="doc-2",
+        format=CadFormat.STEP,
+        unit_system=SourceUnitSystem(),
+    )
+
+
+def _source_with_document(
+    document: SourceDocumentIdentity, key: str = "slab-1"
+) -> SourceEntityIdentity:
+    return SourceEntityIdentity(
+        source_document=document,
+        source_entity_key=key,
+    )
+
+
+def _keyed_model(
+    source: SourceEntityIdentity,
+    neutral: NeutralEntityIdentity,
+) -> NeutralModel:
+    entry = NeutralEntityEntry(identity=neutral)
+    mapping = SourceToNeutralMapping(pairs=[(source, neutral)])
+    return _model(entities=[entry], mapping=mapping)
+
+
+def test_reverse_lookup_resolves_exact_source_in_same_snapshot() -> None:
+    from origlyph.cad.exceptions import UnresolvedSourceIdentityError  # noqa: F401
+
+    source = _source_entity(key="slab-1")
+    neutral = _neutral_identity(key="n-1", source=source)
+    model = _keyed_model(source, neutral)
+    assert model.reverse_lookup(source) == neutral
+    assert model.reverse_lookup(source) is neutral
+
+
+def test_reverse_lookup_returns_neutral_identity_only() -> None:
+    source = _source_entity(key="slab-1")
+    neutral = _neutral_identity(key="n-1", source=source)
+    entry = NeutralEntityEntry(identity=neutral, coordinate_frame=Frame.world())
+    mapping = SourceToNeutralMapping(pairs=[(source, neutral)])
+    model = _model(entities=[entry], mapping=mapping)
+    result = model.reverse_lookup(source)
+    assert result == neutral
+    assert isinstance(result, NeutralEntityIdentity)
+    # identity-only result: no geometry / none of the downstream binding types.
+    assert not isinstance(result, NeutralEntityEntry)
+    assert not hasattr(result, "coordinate_frame")
+
+
+def test_reverse_lookup_unknown_source_fails_closed() -> None:
+    from origlyph.cad.exceptions import UnresolvedSourceIdentityError
+
+    model = _model()
+    missing = _source_entity(key="absent")
+    with pytest.raises(UnresolvedSourceIdentityError):
+        model.reverse_lookup(missing)
+
+
+def test_reverse_lookup_same_key_different_document_does_not_alias() -> None:
+    from origlyph.cad.exceptions import UnresolvedSourceIdentityError
+
+    doc_a = _source_document()
+    doc_b = _other_source_document()
+    src_a = _source_with_document(doc_a, "shared-key")
+    src_b = _source_with_document(doc_b, "shared-key")
+    neutral = _neutral_identity(key="n", source=src_a)
+    model = _keyed_model(src_a, neutral)
+    assert model.reverse_lookup(src_a) is neutral
+    assert src_a != src_b
+    with pytest.raises(UnresolvedSourceIdentityError):
+        model.reverse_lookup(src_b)
+
+
+def test_reverse_lookup_does_not_cross_model_snapshots() -> None:
+    from origlyph.cad.exceptions import UnresolvedSourceIdentityError
+
+    source = _source_entity(key="slab-1")
+    neutral = _neutral_identity(key="n", source=source)
+    entry = NeutralEntityEntry(identity=neutral)
+    mapping = SourceToNeutralMapping(pairs=[(source, neutral)])
+    model_a = _model(entities=[entry], mapping=mapping)
+    model_b = _model()
+    assert model_a.reverse_lookup(source) is neutral
+    with pytest.raises(UnresolvedSourceIdentityError):
+        model_b.reverse_lookup(source)
+
+
+def test_reverse_lookup_is_deterministic() -> None:
+    source = _source_entity(key="slab-1")
+    neutral = _neutral_identity(key="n", source=source)
+    model = _keyed_model(source, neutral)
+    first = model.reverse_lookup(source)
+    second = model.reverse_lookup(source)
+    assert first is neutral
+    assert first == second
+    assert hash(first) == hash(second)
+
+
+def test_reverse_lookup_leaves_existing_lookups_unchanged() -> None:
+    source = _source_entity(key="slab-1")
+    neutral = _neutral_identity(key="n", source=source)
+    entry = NeutralEntityEntry(identity=neutral)
+    mapping = SourceToNeutralMapping(pairs=[(source, neutral)])
+    model = _model(entities=[entry], mapping=mapping)
+    # existing forward lookups still behave exactly as before.
+    assert model.entity_by_identity(neutral) is entry
+    assert model.entity_by_source(source) is entry
+    # new reverse lookup returns the identity only.
+    assert model.reverse_lookup(source) is neutral
+
+
+def test_mapping_duplicate_rejection_precludes_ambiguity() -> None:
+    # A single SourceEntityIdentity can never map to >1 neutral identity:
+    # SourceToNeutralMapping rejects a duplicate source key at construction.
+    from origlyph.cad import DuplicateSourceEntityError
+
+    source = _source_entity(key="slab-1")
+    neutral_a = _neutral_identity(key="n-a", source=source)
+    neutral_b = _neutral_identity(key="n-b", source=source)
+    with pytest.raises(DuplicateSourceEntityError):
+        SourceToNeutralMapping(
+            pairs=[(source, neutral_a), (source, neutral_b)]
+        )

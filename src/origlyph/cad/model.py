@@ -27,6 +27,7 @@ from origlyph.geometry import (
 from .exceptions import (
     DuplicateNeutralEntityError,
     DuplicateSourceEntityError,
+    UnresolvedSourceIdentityError,
 )
 from .identity import (
     NeutralEntityIdentity,
@@ -231,3 +232,30 @@ class NeutralModel:
         if neutral is None:
             return None
         return self.entity_by_identity(neutral)
+
+    def reverse_lookup(
+        self, source_entity_identity: SourceEntityIdentity
+    ) -> NeutralEntityIdentity:
+        """Resolve the ``NeutralEntityIdentity`` mapped from ``source``.
+
+        Stage 10P. Model-scoped, exact, fail-closed reverse lookup: returns
+        the neutral identity this model's source-to-neutral mapping associates
+        with the given ``source``, or raises :class:`UnresolvedSourceIdentityError`
+        when no mapping exists. Only the current model snapshot is consulted:
+        there is no cross-model, cross-revision, geometry, or heuristic search.
+        Ambiguity cannot occur because :class:`SourceToNeutralMapping` rejects
+        duplicate source keys at construction, so each source maps to at most
+        one neutral identity.
+
+        Raises
+        ------
+        UnresolvedSourceIdentityError
+            If ``source_entity_identity`` is not mapped in this model.
+        """
+        neutral = self.source_to_neutral.source_to_neutral(source_entity_identity)
+        if neutral is None:
+            raise UnresolvedSourceIdentityError(
+                f"no neutral identity mapped from source "
+                f"{source_entity_identity.source_entity_key!r}"
+            )
+        return neutral

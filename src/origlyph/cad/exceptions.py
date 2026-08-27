@@ -41,3 +41,14 @@ class DuplicateSourceEntityError(OriglyphCadError):
 
 class DuplicateNeutralEntityError(OriglyphCadError):
     """Raised when a model/mapping contains a duplicate neutral identity."""
+
+
+class UnresolvedSourceIdentityError(OriglyphCadError):
+    """Raised when a SourceEntityIdentity has no mapping within the model.
+
+    Stage 10P. Fail-closed reverse lookup: an exact ``SourceEntityIdentity``
+    that is not present in the relevant model's source-to-neutral mapping is
+    an unresolved lookup, never a guessed or heuristic match. This exception
+    is internal to the CAD model/identity layer and is not part of the public
+    ``origlyph.cad`` export surface by default.
+    """

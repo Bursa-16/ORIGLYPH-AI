@@ -52,6 +52,7 @@ from .role import (
     bind_datum_constraint,
     bind_datum_reference_frame,
 )
+from .stl import StlImporter
 
 __all__ = [
     "BoundReference",
@@ -81,6 +82,7 @@ __all__ = [
     "SourceEntityIdentity",
     "SourceToNeutralMapping",
     "SourceUnitSystem",
+    "StlImporter",
     "UnsupportedCadFormatError",
     "UnsupportedContent",
     "UnsupportedSourceUnitError",

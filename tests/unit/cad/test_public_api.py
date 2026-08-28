@@ -31,6 +31,7 @@ EXPECTED_EXPORTS = {
     "SourceEntityIdentity",
     "SourceToNeutralMapping",
     "SourceUnitSystem",
+    "StlImporter",
     "UnsupportedCadFormatError",
     "UnsupportedContent",
     "UnsupportedSourceUnitError",

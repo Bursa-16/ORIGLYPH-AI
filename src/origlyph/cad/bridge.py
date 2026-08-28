@@ -5,7 +5,9 @@ model and the Stage 1B datum/reference primitives. It is **filter-only and
 non-inferring**:
 
 * it lifts eligible POINT / PLANE / AXIS / LINE entities into the reference /
-  datum-feature candidate universe (via :class:`BridgedCandidate`);
+  datum-feature candidate universe (via :class:`BridgedCandidate`); a PLANE
+  entity may carry a finite ``BoundedPlanarFace`` whose deterministic frame is
+  derived from the face's centroid and plane normal;
 * it records deterministic, technical skip reasons for ineligible entities
   (:class:`SkippedCandidate` / :class:`CandidateResult`);
 * it exposes the provenance-ready identity chain
@@ -35,7 +37,14 @@ from origlyph.datum import (
     ReferencePoint,
     ReferenceSurface,
 )
-from origlyph.geometry import Frame, Line3D, Plane3D, Point3D, Vector3D
+from origlyph.geometry import (
+    BoundedPlanarFace,
+    Frame,
+    Line3D,
+    Plane3D,
+    Point3D,
+    Vector3D,
+)
 
 from .identity import (
     DomainIdentity,
@@ -183,7 +192,9 @@ def resolve_entity_frame(entity: NeutralEntityEntry) -> Optional[Frame]:
        - ``Plane3D`` -> z-axis == normal verbatim, x/y completed
          deterministically;
        - ``Line3D``  -> z-axis == direction verbatim, x/y completed
-         deterministically.
+         deterministically;
+       - ``BoundedPlanarFace`` -> z-axis == plane normal verbatim, origin ==
+         face centroid, x/y completed deterministically.
 
     No geometry / no coordinate frame -> ``None`` (fail-closed).
     """
@@ -203,24 +214,27 @@ def resolve_entity_frame(entity: NeutralEntityEntry) -> Optional[Frame]:
         return _frame_with_axis(geometry.normal)
     if isinstance(geometry, Line3D):
         return _frame_with_axis(geometry.direction)
+    if isinstance(geometry, BoundedPlanarFace):
+        return _frame_with_axis(geometry.plane.normal, geometry.centroid)
     return None
 
 
-def _frame_with_axis(axis: Vector3D) -> Frame:
+def _frame_with_axis(axis: Vector3D, origin: Optional[Point3D] = None) -> Frame:
     """Build a deterministic right-handed frame with ``axis`` as the z-axis.
 
     The supplied axis is taken verbatim as the z basis. A cross product with
     the first fixed reference vector that is not parallel yields x; y is then
-    ``z x x``. Pure vector math only; no hidden orientation policy.
+    ``z x x``. Pure vector math only; no hidden orientation policy. The frame
+    origin defaults to the world origin unless one is supplied.
     """
     z = axis.normalize()
+    if origin is None:
+        origin = Point3D(0.0, 0.0, 0.0)
     for reference in _REFERENCE_VECTORS:
         if not reference.cross(z).is_zero():
             x = reference.cross(z).normalize()
             y = z.cross(x)
-            return Frame(
-                origin=Point3D(0.0, 0.0, 0.0), x_axis=x, y_axis=y, z_axis=z
-            )
+            return Frame(origin=origin, x_axis=x, y_axis=y, z_axis=z)
     raise ValueError("cannot complete orthonormal frame from axis")
 
 

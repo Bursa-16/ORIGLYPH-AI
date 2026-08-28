@@ -9,6 +9,9 @@ from origlyph.cad import (
     SourceDocumentIdentity,
     SourceEntityIdentity,
     SourceUnitSystem,
+    bind_datum_constraint,
+    bind_datum_reference_frame,
+    bind_reference,
 )
 from origlyph.cad.bridge import (
     BridgedCandidate,
@@ -30,7 +33,14 @@ from origlyph.datum import (
     ReferencePoint,
     ReferenceSurface,
 )
-from origlyph.geometry import Frame, Line3D, Plane3D, Point3D, Vector3D
+from origlyph.geometry import (
+    BoundedPlanarFace,
+    Frame,
+    Line3D,
+    Plane3D,
+    Point3D,
+    Vector3D,
+)
 
 
 def _world() -> Frame:
@@ -86,6 +96,17 @@ def _model(entries) -> NeutralModel:
         root_frame=_world(),
         entities=list(entries),
         source_to_neutral=SourceToNeutralMapping(),
+    )
+
+
+def _square_face() -> BoundedPlanarFace:
+    return BoundedPlanarFace(
+        vertices=(
+            Point3D(0.0, 0.0, 0.0),
+            Point3D(4.0, 0.0, 0.0),
+            Point3D(4.0, 4.0, 0.0),
+            Point3D(0.0, 4.0, 0.0),
+        )
     )
 def test_domain_identity_deterministic() -> None:
     neutral = _neutral("n-1", NeutralEntityKind.POINT)
@@ -222,6 +243,83 @@ def test_resolve_entity_frame_line_uses_direction_verbatim() -> None:
 def test_resolve_entity_frame_none_without_frame_or_geometry() -> None:
     entry = _entry("p-1", NeutralEntityKind.POINT)
     assert resolve_entity_frame(entry) is None
+
+
+def test_resolve_entity_frame_face_uses_centroid_and_plane_normal() -> None:
+    entry = _entry("f-1", NeutralEntityKind.PLANE, geometry=_square_face())
+    frame = resolve_entity_frame(entry)
+    assert frame is not None
+    assert frame.origin == Point3D(2.0, 2.0, 0.0)
+    assert frame.z_axis == Vector3D(0.0, 0.0, 1.0)
+    assert frame.x_axis == Vector3D(1.0, 0.0, 0.0)
+    assert frame.y_axis == Vector3D(0.0, 1.0, 0.0)
+    assert frame.x_axis.cross(frame.y_axis) == frame.z_axis
+
+
+def test_resolve_entity_frame_face_prefers_explicit_coordinate_frame() -> None:
+    explicit = Frame(
+        origin=Point3D(5.0, 5.0, 5.0),
+        x_axis=Vector3D(1.0, 0.0, 0.0),
+        y_axis=Vector3D(0.0, 1.0, 0.0),
+        z_axis=Vector3D(0.0, 0.0, 1.0),
+    )
+    entry = _entry(
+        "f-1",
+        NeutralEntityKind.PLANE,
+        frame=explicit,
+        geometry=_square_face(),
+    )
+    assert resolve_entity_frame(entry) == explicit
+
+
+def test_resolve_entity_frame_face_is_deterministic() -> None:
+    first = resolve_entity_frame(
+        _entry("f-1", NeutralEntityKind.PLANE, geometry=_square_face())
+    )
+    second = resolve_entity_frame(
+        _entry("f-1", NeutralEntityKind.PLANE, geometry=_square_face())
+    )
+    assert first is not None
+    assert first == second
+
+
+def test_face_entity_is_not_skipped_for_missing_frame() -> None:
+    entry = _entry("f-1", NeutralEntityKind.PLANE, geometry=_square_face())
+    result = extract_candidates(_model([entry]))
+    assert len(result.candidates) == 1
+    assert result.skipped == ()
+
+
+def test_face_candidate_preserves_identity_chain() -> None:
+    entry = _entry("f-1", NeutralEntityKind.PLANE, geometry=_square_face())
+    candidate = extract_candidates(_model([entry])).candidates[0]
+    source, neutral, domain = identity_chain(candidate)
+    assert source == entry.identity.source_identity
+    assert neutral == entry.identity
+    assert domain.value == "f-1"
+    bound = bind_reference(candidate)
+    assert bound.source_identity == entry.identity.source_identity
+    assert bound.neutral_identity == entry.identity
+
+
+def test_face_candidate_carries_no_rank_or_role() -> None:
+    entry = _entry("f-1", NeutralEntityKind.PLANE, geometry=_square_face())
+    candidate = extract_candidates(_model([entry])).candidates[0]
+    assert isinstance(candidate.reference, ReferenceSurface)
+    assert candidate.datum_feature.kind is FeatureKind.PLANE
+    for name in ("rank", "score", "confidence"):
+        assert not hasattr(candidate, name)
+
+
+def test_face_lifts_through_full_datum_chain() -> None:
+    entry = _entry("f-1", NeutralEntityKind.PLANE, geometry=_square_face())
+    candidate = extract_candidates(_model([entry])).candidates[0]
+    bound = bind_reference(candidate)
+    constraint = bind_datum_constraint(bound, ConstraintType.PRIMARY)
+    frame = bind_datum_reference_frame("drf", [(bound, ConstraintType.PRIMARY)])
+    assert frame.total_constrained == 3
+    assert frame.remaining_free == 3
+    assert frame.reference_frame == constraint.theoretical.frame
 
 
 def test_unsupported_kind_is_skipped() -> None:

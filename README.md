@@ -4,8 +4,8 @@
 
 * **Name:** Origlyph
 * **Current status:** Third public alpha — deterministic CAD and datum engineering foundation
-* **Package version:** `0.3.0a1`
-* **Current release/tag:** `v0.3.0-alpha.1`
+* **Package version:** `0.3.0a2`
+* **Current release/tag:** `v0.3.0-alpha.2`
 
 ## Purpose
 
@@ -196,6 +196,19 @@ provenance or first-principles derivation.
 py -m pip install -e ".[dev]"
 ```
 
+## Quick STL Demo
+
+```sh
+py examples\stl_datum_demo.py path\to\part.stl
+```
+
+* STL coordinates are explicitly declared as millimetres (`mm`); no automatic
+  unit inference or conversion is performed.
+* The demo datum reference frame is built from the first three valid planar
+  facets in file order, only to exercise the deterministic API.
+* This is **not** automatic datum recommendation: Origlyph does not rank,
+  score, or recommend datum features.
+
 ## Verification
 
 ```sh
@@ -204,12 +217,13 @@ py -m ruff check src tests
 py -m pyright
 ```
 
-Verified baseline for v0.3.0-alpha.1: 501 tests passed; Ruff PASS; Pyright PASS.
+Verified baseline for v0.3.0-alpha.2: 515 tests passed; Ruff PASS; Pyright PASS.
 
 ## Release
 
-Current prerelease: `v0.3.0-alpha.1` (package version `0.3.0a1`).
-Release notes: [RELEASE_NOTES_v0.3.0-alpha.1.md](RELEASE_NOTES_v0.3.0-alpha.1.md).
+Current prerelease: `v0.3.0-alpha.2` (package version `0.3.0a2`).
+Release notes: [RELEASE_NOTES_v0.3.0-alpha.2.md](RELEASE_NOTES_v0.3.0-alpha.2.md);
+previous: [RELEASE_NOTES_v0.3.0-alpha.1.md](RELEASE_NOTES_v0.3.0-alpha.1.md).
 
 ## License
 

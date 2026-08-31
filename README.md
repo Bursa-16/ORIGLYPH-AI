@@ -26,7 +26,7 @@ everything else is roadmap, not implementation.
 
 ## Current Development Status
 
-v0.3.0-alpha.1 provides a deterministic geometry foundation, CAD identity and
+v0.3.0-alpha.2 provides a deterministic geometry foundation, CAD identity and
 neutral-model contracts, a concrete STL importer, source-to-neutral
 provenance, a CAD-to-datum candidate bridge, explicit datum/reference
 binding, explicit PRIMARY / SECONDARY / TERTIARY role assignment,
@@ -208,6 +208,26 @@ py examples\stl_datum_demo.py path\to\part.stl
   facets in file order, only to exercise the deterministic API.
 * This is **not** automatic datum recommendation: Origlyph does not rank,
   score, or recommend datum features.
+
+## Quick GUI Demo
+
+```sh
+py examples\stl_datum_gui.py
+```
+
+* Launches a minimal Tkinter desktop GUI over the same deterministic pipeline.
+* A native local `*.stl` file picker is used; no path is hardcoded and no
+  network is involved.
+* STL units are explicitly declared as millimetres (`mm`); no unit inference
+  or unit conversion is performed.
+* The STL stored facet normal is shown only as a diagnostic labelled
+  `Authority: NON-AUTHORITATIVE`; the winding-derived face normal is the
+  geometry authority.
+* The operator explicitly assigns PRIMARY, SECONDARY, and TERTIARY roles to
+  three distinct candidates — the same candidate cannot occupy two roles at
+  once.
+* Origlyph does **not** automatically rank, score, or recommend datum
+  features: every role assignment is a manual operator choice.
 
 ## Verification
 

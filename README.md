@@ -3,9 +3,9 @@
 ## Project Identity
 
 * **Name:** Origlyph
-* **Current status:** Third public alpha — deterministic CAD and datum engineering foundation
-* **Package version:** `0.3.0a2`
-* **Current release/tag:** `v0.3.0-alpha.2`
+* **Current status:** Fourth public alpha — deterministic CAD and datum engineering foundation with first interactive desktop GUI
+* **Package version:** `0.4.0a1`
+* **Current release/tag:** `v0.4.0-alpha.1`
 
 ## Purpose
 
@@ -26,11 +26,13 @@ everything else is roadmap, not implementation.
 
 ## Current Development Status
 
-v0.3.0-alpha.2 provides a deterministic geometry foundation, CAD identity and
+v0.4.0-alpha.1 provides a deterministic geometry foundation, CAD identity and
 neutral-model contracts, a concrete STL importer, source-to-neutral
 provenance, a CAD-to-datum candidate bridge, explicit datum/reference
 binding, explicit PRIMARY / SECONDARY / TERTIARY role assignment,
-`DatumReferenceFrame` construction, and advisory candidate evaluation.
+`DatumReferenceFrame` construction, advisory candidate evaluation,
+the first executable STL datum CLI workflow, and the first interactive
+Tkinter desktop GUI.
 
 This release is still alpha. It does **not** claim production readiness,
 certification, ASME/ISO compliance, or validated manufacturing acceptance
@@ -237,13 +239,13 @@ py -m ruff check src tests
 py -m pyright
 ```
 
-Verified baseline for v0.3.0-alpha.2: 515 tests passed; Ruff PASS; Pyright PASS.
+Verified baseline for v0.4.0-alpha.1: 534 tests passed; Ruff PASS; Pyright PASS.
 
 ## Release
 
-Current prerelease: `v0.3.0-alpha.2` (package version `0.3.0a2`).
-Release notes: [RELEASE_NOTES_v0.3.0-alpha.2.md](RELEASE_NOTES_v0.3.0-alpha.2.md);
-previous: [RELEASE_NOTES_v0.3.0-alpha.1.md](RELEASE_NOTES_v0.3.0-alpha.1.md).
+Current prerelease: `v0.4.0-alpha.1` (package version `0.4.0a1`).
+Release notes: [RELEASE_NOTES_v0.4.0-alpha.1.md](RELEASE_NOTES_v0.4.0-alpha.1.md);
+previous: [RELEASE_NOTES_v0.3.0-alpha.2.md](RELEASE_NOTES_v0.3.0-alpha.2.md).
 
 ## License
 

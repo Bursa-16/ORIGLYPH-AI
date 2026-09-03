@@ -36,6 +36,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from .exceptions import (
     InvalidCorrelationError,
@@ -43,6 +44,9 @@ from .exceptions import (
     InvalidStatisticalError,
     InvalidToleranceError,
 )
+
+if TYPE_CHECKING:
+    from .sensitivity import CovariancePairImpact
 
 
 class StackDirection(Enum):
@@ -442,3 +446,249 @@ class Correlation:
     def pair(self) -> tuple[str, str]:
         """Return the canonical ordered pair ``(first, second)``."""
         return (self.first, self.second)
+
+
+# ---------------------------------------------------------------------------
+# Budget analysis (Stage 15G) — compliance status and contributor impact
+# ---------------------------------------------------------------------------
+
+
+class BudgetStatus(Enum):
+    """Tolerance-budget compliance status.
+
+    ``UNDER_BUDGET``: the stack's actual span fits within the allowed budget
+    with positive remaining margin.
+
+    ``AT_BUDGET``: the actual span equals the allowed span within a small
+    deterministic tolerance. Neither ``UNDER_BUDGET`` nor ``OVER_BUDGET``.
+
+    ``OVER_BUDGET``: the actual span exceeds the allowed budget; the remaining
+    margin is negative.
+    """
+
+    UNDER_BUDGET = "under_budget"
+    AT_BUDGET = "at_budget"
+    OVER_BUDGET = "over_budget"
+
+
+@dataclass(frozen=True)
+class WorstCaseContributionBudget:
+    """Budget impact of one contributor on the worst-case stack span.
+
+    Every numeric field is derived read-only from the contributor and the
+    authoritative worst-case result. Fractions and percentages are
+    deterministic; a zero actual span yields ``share_of_consumed = 0.0``
+    (documented policy — no division is performed).
+
+    Attributes
+    ----------
+    name:
+        Human-readable contributor identifier (for traceability).
+    signed_nominal:
+        Signed nominal contribution to the stack total.
+    direction:
+        How the contributor enters the stack (FORWARD adds, INVERSE
+        subtracts).
+    lower_deviation:
+        Lower deviation of this contributor from its nominal.
+    upper_deviation:
+        Upper deviation of this contributor from its nominal.
+    span:
+        Contributor tolerance span (always ``upper - lower >= 0``).
+    share_of_consumed:
+        Fraction of the actual stack span attributed to this contributor.
+        ``span / total_span``. Zero if ``total_span`` is zero.
+    share_of_allowed:
+        Fraction of the allowed budget consumed by this contributor.
+        ``span / allowed_span``.
+    percentage_of_consumed:
+        ``100 * share_of_consumed``.
+    percentage_of_allowed:
+        ``100 * share_of_allowed``.
+    """
+
+    name: str
+    signed_nominal: float
+    direction: StackDirection
+    lower_deviation: float
+    upper_deviation: float
+    span: float
+    share_of_consumed: float
+    share_of_allowed: float
+    percentage_of_consumed: float
+    percentage_of_allowed: float
+
+
+@dataclass(frozen=True)
+class WorstCaseBudgetResult:
+    """Result of deterministic worst-case tolerance-budget compliance analysis.
+
+    All authoritative numbers are delegated to the existing worst-case engine.
+    Budget analysis evaluates compliance; it does not modify tolerances.
+
+    Attributes
+    ----------
+    nominal:
+        Stack nominal value from the authoritative engine.
+    minimum:
+        Stack minimum from the authoritative engine.
+    maximum:
+        Stack maximum from the authoritative engine.
+    actual_span:
+        Worst-case span consumed by the stack (``maximum - minimum``).
+    allowed_span:
+        Maximum permitted span (validated as finite and strictly positive).
+    remaining_margin:
+        ``allowed_span - actual_span``.
+    utilization_fraction:
+        ``actual_span / allowed_span``.
+    utilization_percentage:
+        ``100 * utilization_fraction``.
+    status:
+        ``UNDER_BUDGET``, ``AT_BUDGET``, or ``OVER_BUDGET``.
+    contributions:
+        Per-contributor budget impacts (ordered by descending span, ties
+        preserve input order).
+    """
+
+    nominal: float
+    minimum: float
+    maximum: float
+    actual_span: float
+    allowed_span: float
+    remaining_margin: float
+    utilization_fraction: float
+    utilization_percentage: float
+    status: BudgetStatus
+    contributions: tuple[WorstCaseContributionBudget, ...]
+
+
+@dataclass(frozen=True)
+class StatisticalContributionBudget:
+    """Budget impact of one contributor on the statistical stack.
+
+    Statistical budget analysis reuses the variance decomposition from
+    Stage 15F sensitivity analysis. The statistical interval span
+    (``upper_bound - lower_bound``) is not linearly decomposable, so
+    contributor shares use variance fractions from the authoritative
+    sensitivity analysis.
+
+    Attributes
+    ----------
+    name:
+        Human-readable contributor identifier.
+    direction:
+        How the contributor enters the stack.
+    sigma:
+        Standard deviation of the contributor.
+    variance:
+        Individual variance contribution ``a_i^2 * sigma_i^2``.
+    share_of_consumed:
+        Fraction of total variance attributed to this contributor.
+        Reuses the authoritative Stage 15F sensitivity fraction.
+    share_of_allowed:
+        ``share_of_consumed * utilization_fraction`` — the fraction of
+        the allowed statistical budget attributed to this contributor.
+    percentage_of_consumed:
+        ``100 * share_of_consumed``.
+    percentage_of_allowed:
+        ``100 * share_of_allowed``.
+    """
+
+    name: str
+    direction: StackDirection
+    sigma: float
+    variance: float
+    share_of_consumed: float
+    share_of_allowed: float
+    percentage_of_consumed: float
+    percentage_of_allowed: float
+
+
+@dataclass(frozen=True)
+class StatisticalBudgetResult:
+    """Result of deterministic statistical tolerance-budget compliance analysis.
+
+    All authoritative numbers are delegated to the existing statistical engine
+    and Stage 15F sensitivity analysis. Budget analysis evaluates compliance;
+    it does not modify tolerances.
+
+    Statistical budget compliance does NOT imply worst-case compliance.
+
+    Attributes
+    ----------
+    nominal:
+        Stack nominal value from the authoritative engine.
+    combined_sigma:
+        Combined standard deviation from the authoritative engine.
+    sigma_multiplier:
+        Sigma multiplier used for bound computation.
+    lower_bound:
+        Lower statistical bound from the authoritative engine.
+    upper_bound:
+        Upper statistical bound from the authoritative engine.
+    actual_span:
+        Statistical interval span (``upper_bound - lower_bound``).
+    allowed_span:
+        Maximum permitted span (validated as finite and strictly positive).
+    remaining_margin:
+        ``allowed_span - actual_span``.
+    utilization_fraction:
+        ``actual_span / allowed_span``.
+    utilization_percentage:
+        ``100 * utilization_fraction``.
+    status:
+        ``UNDER_BUDGET``, ``AT_BUDGET``, or ``OVER_BUDGET``.
+    contributions:
+        Per-contributor budget impacts (ordered by descending variance, ties
+        preserve input order).
+    covariance_pairs:
+        Per-pair covariance impacts from Stage 15F sensitivity analysis.
+    """
+
+    nominal: float
+    combined_sigma: float
+    sigma_multiplier: float
+    lower_bound: float
+    upper_bound: float
+    actual_span: float
+    allowed_span: float
+    remaining_margin: float
+    utilization_fraction: float
+    utilization_percentage: float
+    status: BudgetStatus
+    contributions: tuple[StatisticalContributionBudget, ...]
+    covariance_pairs: tuple["CovariancePairImpact", ...]
+
+
+@dataclass(frozen=True)
+class WorstCaseWindowResult:
+    """Result of worst-case interval window-compliance check.
+
+    Checks whether the authoritative worst-case interval lies completely
+    inside a permitted window. Window compliance is independent of
+    span-based budget analysis.
+
+    Attributes
+    ----------
+    nominal:
+        Stack nominal value.
+    minimum:
+        Stack minimum from the authoritative engine.
+    maximum:
+        Stack maximum from the authoritative engine.
+    allowed_lower:
+        Lower bound of the permitted window.
+    allowed_upper:
+        Upper bound of the permitted window.
+    is_compliant:
+        ``True`` if ``allowed_lower <= minimum`` and
+        ``maximum <= allowed_upper``.
+    """
+
+    nominal: float
+    minimum: float
+    maximum: float
+    allowed_lower: float
+    allowed_upper: float
+    is_compliant: bool

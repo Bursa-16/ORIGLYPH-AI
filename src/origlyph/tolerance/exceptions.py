@@ -52,3 +52,11 @@ class InvalidCorrelationError(OriglyphToleranceError):
     Examples: rho outside [-1, 1], non-finite rho, unknown contributor
     reference, duplicate/conflicting correlation pairs.
     """
+
+
+class InvalidBudgetError(OriglyphToleranceError):
+    """Raised when a tolerance-budget definition is invalid.
+
+    Examples: non-positive, non-finite, or NaN allowed span;
+    non-finite or NaN allowed window bounds; invalid window ordering.
+    """

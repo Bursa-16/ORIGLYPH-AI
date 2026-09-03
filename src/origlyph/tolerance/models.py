@@ -27,7 +27,11 @@ import math
 from dataclasses import dataclass
 from enum import Enum
 
-from .exceptions import InvalidStackError, InvalidToleranceError
+from .exceptions import (
+    InvalidStackError,
+    InvalidStatisticalError,
+    InvalidToleranceError,
+)
 
 
 class StackDirection(Enum):
@@ -112,15 +116,33 @@ class ToleranceContribution:
         return (lower, upper)
 
 
-def _validate_finite(value: float, field_name: str) -> float:
-    """Coerce to float and reject NaN / infinity."""
+def _validate_finite(
+    value: float,
+    field_name: str,
+    error_cls: type[Exception] = InvalidToleranceError,
+) -> float:
+    """Coerce to floatand reject NaN / infinity.
+
+    Parameters
+    ----------
+    value:
+        The raw numeric value to validate.
+
+    field_name:
+        Human-readable field name for error messages.
+
+    error_cls:
+        Exception class to raise on invalid input. Defaults to
+        :class:`InvalidToleranceError`; statistical models pass
+        :class:`InvalidStatisticalError`.
+    """
     result = float(value)
     if math.isnan(result):
-        raise InvalidToleranceError(
+        raise error_cls(
             f"{field_name} must be a finite number, got NaN"
         )
     if math.isinf(result):
-        raise InvalidToleranceError(
+        raise error_cls(
             f"{field_name} must be a finite number, got infinity"
         )
     return result
@@ -204,4 +226,141 @@ class WorstCaseResult:
             self,
             "total_span",
             _validate_finite(self.total_span, "total_span"),
+        )
+
+@dataclass(frozen=True)
+class StatisticalContribution:
+    """A single statistical contribution to a 1D tolerance stack.
+
+    Each contribution is defined by its nominal value, standard deviation
+    (sigma), and stack direction. The standard deviation must be non-negative
+    and finite. Zero sigma is permitted (deterministic contributor).
+
+    Attributes
+    ----------
+    name:
+        Human-readable identifier for traceability.
+    nominal:
+        Signed nominal dimension of the contribution.
+    sigma:
+        Standard deviation of the contribution. Must be non-negative and
+        finite. Zero indicates a deterministic (non-statistical) contributor.
+    direction:
+        How the contribution enters the stack (FORWARD adds, INVERSE
+        subtracts).
+    """
+
+    name: str
+    nominal: float
+    sigma: float
+    direction: StackDirection = StackDirection.FORWARD
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "nominal",
+            _validate_finite(
+                self.nominal, "nominal", InvalidStatisticalError
+            ),
+        )
+        object.__setattr__(
+            self,
+            "sigma",
+            _validate_finite(self.sigma, "sigma", InvalidStatisticalError),
+        )
+        if self.sigma < 0.0:
+            raise InvalidStatisticalError(
+                f"sigma must be non-negative, got {self.sigma}"
+            )
+
+
+@dataclass(frozen=True)
+class StatisticalStack:
+    """An ordered, immutable 1D statistical tolerance stack.
+
+    The stack is an ordered sequence of statistical contributions.
+    Ordering is part of traceability and is preserved.
+
+    Attributes
+    ----------
+    contributions:
+        Ordered tuple of statistical contributions.
+    """
+
+    contributions: tuple[StatisticalContribution, ...]
+
+    def __post_init__(self) -> None:
+        if not self.contributions:
+            raise InvalidStatisticalError(
+                "statistical stack must contain at least one contribution"
+            )
+        for index, contribution in enumerate(self.contributions):
+            if not isinstance(contribution, StatisticalContribution):
+                raise InvalidStatisticalError(
+                    f"stack element at index {index} is not a "
+                    "StatisticalContribution"
+                )
+
+
+@dataclass(frozen=True)
+class StatisticalResult:
+    """Deterministic result of a 1D statistical (RSS) tolerance analysis.
+
+    Attributes
+    ----------
+    nominal:
+        Nominal stack value (sum of signed nominals).
+    combined_sigma:
+        Root-sum-square combined standard deviation.
+    sigma_multiplier:
+        Multiplier k applied to combined_sigma for bound computation.
+    lower_bound:
+        ``nominal - k * combined_sigma``.
+    upper_bound:
+        ``nominal + k * combined_sigma``.
+    """
+
+    nominal: float
+    combined_sigma: float
+    sigma_multiplier: float
+    lower_bound: float
+    upper_bound: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "nominal",
+            _validate_finite(
+                self.nominal, "nominal", InvalidStatisticalError
+            ),
+        )
+        object.__setattr__(
+            self,
+            "combined_sigma",
+            _validate_finite(
+                self.combined_sigma, "combined_sigma", InvalidStatisticalError
+            ),
+        )
+        object.__setattr__(
+            self,
+            "sigma_multiplier",
+            _validate_finite(
+                self.sigma_multiplier,
+                "sigma_multiplier",
+                InvalidStatisticalError,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "lower_bound",
+            _validate_finite(
+                self.lower_bound, "lower_bound", InvalidStatisticalError
+            ),
+        )
+        object.__setattr__(
+            self,
+            "upper_bound",
+            _validate_finite(
+                self.upper_bound, "upper_bound", InvalidStatisticalError
+            ),
         )

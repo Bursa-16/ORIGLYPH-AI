@@ -27,3 +27,11 @@ class InvalidStackError(OriglyphToleranceError):
 
     Examples: empty stack, or a stack containing an invalid contribution.
     """
+
+
+class InvalidStatisticalError(OriglyphToleranceError):
+    """Raised when a statistical tolerance definition is invalid.
+
+    Examples: negative sigma, non-finite sigma, invalid sigma multiplier,
+    or malformed statistical stack.
+    """

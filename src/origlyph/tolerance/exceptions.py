@@ -35,3 +35,20 @@ class InvalidStatisticalError(OriglyphToleranceError):
     Examples: negative sigma, non-finite sigma, invalid sigma multiplier,
     or malformed statistical stack.
     """
+
+
+class InvalidVarianceError(OriglyphToleranceError):
+    """Raised when propagated variance is materially invalid.
+
+    A small tolerance (±1e-15) is permitted for floating-point round-off; but
+    any materially negative variance resulting from correlation inputs is
+    rejected so that invalid engineering data is never silently repaired.
+    """
+
+
+class InvalidCorrelationError(OriglyphToleranceError):
+    """Raised when a correlation definition is invalid.
+
+    Examples: rho outside [-1, 1], non-finite rho, unknown contributor
+    reference, duplicate/conflicting correlation pairs.
+    """

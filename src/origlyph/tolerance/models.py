@@ -19,6 +19,16 @@ Engineering meaning of a tolerance contribution:
 Numeric policy: standard Python ``float``. No ``Decimal``, NumPy, or other
 numeric dependency is introduced. All values must be finite; NaN and
 infinity are rejected at construction.
+
+Correlation modeling:
+
+* ``Correlation`` captures an explicit pairwise Pearson correlation
+  coefficient between two contributors in a statistical stack.
+  Correlations must be supplied explicitly by the engineer; Origlyph
+  does **not** infer manufacturing correlations.
+* Missing pairwise correlation defaults to ρ = 0 (independent).
+* Correlation terms are validated to be finite and within [-1, 1];
+  no clamping is performed.
 """
 
 from __future__ import annotations
@@ -28,6 +38,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .exceptions import (
+    InvalidCorrelationError,
     InvalidStackError,
     InvalidStatisticalError,
     InvalidToleranceError,
@@ -364,3 +375,70 @@ class StatisticalResult:
                 self.upper_bound, "upper_bound", InvalidStatisticalError
             ),
         )
+
+
+@dataclass(frozen=True)
+class Correlation:
+    """Explicit pairwise Pearson correlation between two statistical contributors.
+
+    A correlation captures an explicit engineering assumption about how two
+    contributors co-vary.  Origlyph never infers correlations on its own;
+    every correlation must be supplied explicitly by the caller.
+
+    Canonical ordering:
+
+    The two contributor names are normalized so that ``first <= second``
+    lexicographically.  This guarantees that ``Correlation("B", "A", 0.5)``
+    and ``Correlation("A", "B", 0.5)`` are equal and hash identically, so
+    pair symmetry is enforced automatically and duplicate definitions are
+    rejected.
+
+    Attributes
+    ----------
+    first:
+        Identifier of the first contributor.  Must be a non-empty string
+        and must refer to a contributor present in the statistical stack.
+    second:
+        Identifier of the second contributor.  Must be a non-empty string,
+        different from ``first``, and must refer to a contributor present
+        in the statistical stack.
+    coefficient:
+        Pearson correlation coefficient ρ.  Must be finite and within the
+        closed interval [-1, 1].  No clamping is performed.
+    """
+
+    first: str
+    second: str
+    coefficient: float
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.first, str) or self.first == "":
+            raise InvalidCorrelationError(
+                "correlation 'first' contributor must be a non-empty string"
+            )
+        if not isinstance(self.second, str) or self.second == "":
+            raise InvalidCorrelationError(
+                "correlation 'second' contributor must be a non-empty string"
+            )
+        if self.first == self.second:
+            raise InvalidCorrelationError(
+                "correlation between a contributor and itself is not permitted; "
+                "self-correlation is defined implicitly as rho = 1.0"
+            )
+        # Canonical ordering for pair symmetry and deduplication.
+        first, second = sorted((self.first, self.second))
+        object.__setattr__(self, "first", first)
+        object.__setattr__(self, "second", second)
+        rho = _validate_finite(
+            self.coefficient, "coefficient", InvalidCorrelationError
+        )
+        if rho < -1.0 or rho > 1.0:
+            raise InvalidCorrelationError(
+                f"correlation coefficient must be within [-1, 1], got {rho}"
+            )
+        object.__setattr__(self, "coefficient", rho)
+
+    @property
+    def pair(self) -> tuple[str, str]:
+        """Return the canonical ordered pair ``(first, second)``."""
+        return (self.first, self.second)

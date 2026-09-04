@@ -79,3 +79,12 @@ class InvalidStatisticalAllocationError(OriglyphToleranceError):
     contributor references in a statistical stack; malformed statistical
     allocation plans.
     """
+
+
+class InvalidToleranceDecisionError(OriglyphToleranceError):
+    """Raised when a tolerance decision evaluation is invalid.
+
+    Examples: neither worst-case nor statistical stack provided; required
+    allowed window not supplied; malformed decision inputs that cannot
+    be processed by the existing deterministic engines.
+    """

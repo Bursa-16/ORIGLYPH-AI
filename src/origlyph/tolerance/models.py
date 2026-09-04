@@ -1273,3 +1273,287 @@ class StatisticalAllocationReconciliationResult:
     correlation_impacts: tuple[StatisticalAllocationCovarianceImpact, ...]
     missing_contributors: tuple[str, ...]
     is_complete: bool
+
+
+# ===========================================================================
+# Stage 15K — Deterministic Tolerance Decision Layer
+# ===========================================================================
+#
+# The decision layer orchestrates the existing tolerance-analysis engines
+# into a single coherent, traceable engineering decision.  It does **not**
+# recompute any of the existing math; it delegates to the authoritative
+# engines and combines their outputs under deterministic decision rules.
+#
+# The decision statuses are intentionally distinct from the existing
+# BudgetStatus / AllocationStatus / ReconciliationStatus enums.  Those enums
+# describe compliance of a single dimension (budget, allocation plan, or
+# reconciliation).  ToleranceDecisionStatus describes the **overall**
+# engineering decision, including consistency between worst-case and
+# statistical analysis and the state of any optional reconciliation
+# dimensions.
+
+
+class ToleranceDecisionStatus(Enum):
+    """Overall deterministic tolerance decision status.
+
+    Members
+    -------
+    PASS:
+        All required deterministic criteria pass with no boundary
+        condition.  No mandatory analysis dimension reports a failure
+        and no dimension is at the equality boundary.
+    MARGINAL:
+        The design technically passes but is at the deterministic
+        decision boundary according to the established equality policy
+        (``1e-12``).  A MARGINAL decision requires explicit engineering
+        review; it is not a PASS.
+    FAIL:
+        A mandatory engineering criterion is violated.  The decision
+        layer never silently downgrades a FAIL.
+    INCOMPLETE:
+        The decision cannot be safely completed because mandatory
+        deterministic inputs are absent or the input configuration is
+        not sufficient to make a deterministic statement.  A required
+        stack or a required allowed window was not supplied.
+    """
+
+    PASS = "pass"
+    MARGINAL = "marginal"
+    FAIL = "fail"
+    INCOMPLETE = "incomplete"
+
+
+class ToleranceDecisionSeverity(Enum):
+    """Severity classification for a single deterministic reason.
+
+    Members
+    -------
+    INFO:
+        Informational observation; does not change the decision.
+    BOUNDARY:
+        The observation is at the deterministic decision boundary.
+    FAILURE:
+        The observation reports a violation of a required criterion.
+    """
+
+    INFO = "info"
+    BOUNDARY = "boundary"
+    FAILURE = "failure"
+
+
+class ToleranceDecisionReasonCode(Enum):
+    """Stable reason codes for decision-layer observations.
+
+    Each reason code is paired with a severity and (when relevant) a
+    numeric evidence payload.  The codes are stable; downstream tooling
+    may rely on them.
+    """
+
+    WC_REQUIREMENT_EXCEEDED = "wc_requirement_exceeded"
+    WC_REQUIREMENT_AT_BOUNDARY = "wc_requirement_at_boundary"
+    STAT_REQUIREMENT_EXCEEDED = "stat_requirement_exceeded"
+    STAT_REQUIREMENT_AT_BOUNDARY = "stat_requirement_at_boundary"
+    WC_ALLOCATION_EXCEEDED = "wc_allocation_exceeded"
+    WC_ALLOCATION_AT_BOUNDARY = "wc_allocation_at_boundary"
+    STAT_ALLOCATION_EXCEEDED = "stat_allocation_exceeded"
+    STAT_ALLOCATION_AT_BOUNDARY = "stat_allocation_at_boundary"
+    INCOMPLETE_ALLOCATION = "incomplete_allocation"
+    CORRELATION_INCREASES_SIGMA = "correlation_increases_sigma"
+    CORRELATION_DECREASES_SIGMA = "correlation_decreases_sigma"
+    CORRELATION_EFFECTIVELY_NEUTRAL = "correlation_effectively_neutral"
+    WC_STAT_INCONSISTENT = "wc_stat_inconsistent"
+    NO_STACK_PROVIDED = "no_stack_provided"
+    NO_REQUIREMENT_PROVIDED = "no_requirement_provided"
+
+
+@dataclass(frozen=True)
+class ToleranceDecisionReason:
+    """A single deterministic observation in a decision result.
+
+    Reasons are deterministic, typed, and self-explanatory.  No
+    free-form text is generated; downstream tooling may rely on the
+    ``code`` field to render its own message.
+
+    Attributes
+    ----------
+    code:
+        Stable reason code identifying the kind of observation.
+    severity:
+        Severity classification of this observation.
+    scope:
+        Optional scope identifier (for example, a contributor name, an
+        allocation plan identifier, or a stack identifier).  ``None``
+        when the observation is global.
+    detail:
+        Optional deterministic numeric or short-string payload providing
+        the evidence for the observation.
+    """
+
+    code: ToleranceDecisionReasonCode
+    severity: ToleranceDecisionSeverity
+    scope: str | None
+    detail: str | None
+
+
+class ToleranceDecisionEvaluationState(Enum):
+    """State of an individual evaluation dimension within a decision.
+
+    Members
+    -------
+    PASS:
+        The dimension passes the deterministic criterion.
+    AT_BOUNDARY:
+        The dimension is at the equality boundary (see Stage 15G/15H
+        policy of ``1e-12``).
+    FAIL:
+        The dimension violates the deterministic criterion.
+    NOT_REQUESTED:
+        No criterion was supplied for this dimension.
+    INCOMPLETE:
+        A criterion was supplied but the dimension could not be
+        evaluated because a required input was missing.
+    """
+
+    PASS = "pass"
+    AT_BOUNDARY = "at_boundary"
+    FAIL = "fail"
+    NOT_REQUESTED = "not_requested"
+    INCOMPLETE = "incomplete"
+
+
+class ToleranceDecisionCovarianceEffect(Enum):
+    """Deterministic effect of supplied correlations on combined sigma.
+
+    Members
+    -------
+    NOT_REQUESTED:
+        No correlations were supplied.
+    INCREASES:
+        Correlations increase the combined sigma versus the
+        independent reference, beyond the equality tolerance.
+    DECREASES:
+        Correlations decrease the combined sigma versus the
+        independent reference, beyond the equality tolerance.
+    NEUTRAL:
+        The independent and correlated combined sigmas agree within
+        the equality tolerance.
+    """
+
+    NOT_REQUESTED = "not_requested"
+    INCREASES = "increases"
+    DECREASES = "decreases"
+    NEUTRAL = "neutral"
+
+
+@dataclass(frozen=True)
+class ToleranceDecisionSensitivity:
+    """Deterministic controlling-contributor summary.
+
+    Attributes
+    ----------
+    worst_case_controlling:
+        Contributor IDs in deterministic order (most controlling first)
+        based on the worst-case sensitivity engine.  Empty when no
+        worst-case stack was supplied.
+    statistical_controlling:
+        Contributor IDs in deterministic order (most controlling first)
+        based on the statistical variance-contribution engine.  Empty
+        when no statistical stack was supplied.
+    """
+
+    worst_case_controlling: tuple[str, ...]
+    statistical_controlling: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ToleranceDecisionEvidence:
+    """Structured numeric evidence supporting a decision result.
+
+    All numeric fields use the established engineering equality policy
+    (``1e-12``) for any boundary comparison.  None of the values are
+    recomputed from formulas here; they are taken from the
+    authoritative engines and from the decision-classification rules.
+    """
+
+    worst_case_actual_span: float | None
+    worst_case_allowed_span: float | None
+    worst_case_margin: float | None
+    worst_case_utilization_fraction: float | None
+    statistical_actual_combined_sigma: float | None
+    statistical_allowed_combined_sigma: float | None
+    statistical_independent_combined_sigma: float | None
+    statistical_margin: float | None
+    statistical_utilization_fraction: float | None
+    equality_tolerance: float
+
+
+@dataclass(frozen=True)
+class ToleranceDecisionDimension:
+    """A single evaluation dimension within a decision result.
+
+    Each dimension is one of: worst-case requirement, statistical
+    requirement, worst-case allocation reconciliation, or statistical
+    allocation reconciliation.
+    """
+
+    name: str
+    state: ToleranceDecisionEvaluationState
+    actual: float | None
+    allowed: float | None
+    margin: float | None
+
+
+@dataclass(frozen=True)
+class ToleranceDecisionResult:
+    """Result of a deterministic tolerance decision evaluation.
+
+    Attributes
+    ----------
+    overall_status:
+        The deterministic overall engineering decision status
+        (PASS, MARGINAL, FAIL, INCOMPLETE).
+    dimensions:
+        Ordered sequence of per-dimension evaluation outcomes.
+    worst_case_passed:
+        Convenience boolean reflecting only the worst-case requirement
+        dimension.  ``None`` when the worst-case requirement was not
+        requested.
+    statistical_passed:
+        Convenience boolean reflecting only the statistical requirement
+        dimension.  ``None`` when the statistical requirement was not
+        requested.
+    worst_case_reconciliation_passed:
+        Convenience boolean reflecting only the worst-case allocation
+        reconciliation dimension.  ``None`` when no worst-case
+        allocation plan was supplied.
+    statistical_reconciliation_passed:
+        Convenience boolean reflecting only the statistical allocation
+        reconciliation dimension.  ``None`` when no statistical
+        allocation plan was supplied.
+    sensitivity:
+        Controlling-contributor summary from existing sensitivity
+        engines.
+    covariance_effect:
+        Effect of supplied correlations on combined sigma.
+    evidence:
+        Structured numeric evidence.
+    reasons:
+        Ordered tuple of deterministic reason observations.  The
+        ordering is deterministic.
+    is_complete:
+        ``True`` when every requested dimension was evaluated and no
+        dimension reports an INCOMPLETE state.  ``False`` when at least
+        one requested dimension is INCOMPLETE.
+    """
+
+    overall_status: ToleranceDecisionStatus
+    dimensions: tuple[ToleranceDecisionDimension, ...]
+    worst_case_passed: bool | None
+    statistical_passed: bool | None
+    worst_case_reconciliation_passed: bool | None
+    statistical_reconciliation_passed: bool | None
+    sensitivity: ToleranceDecisionSensitivity
+    covariance_effect: ToleranceDecisionCovarianceEffect
+    evidence: ToleranceDecisionEvidence
+    reasons: tuple[ToleranceDecisionReason, ...]
+    is_complete: bool

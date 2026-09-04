@@ -1,6 +1,6 @@
 ﻿"""Origlyph tolerance analysis package.
 
-Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J.
+Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J / 15K.
 
 Deterministic 1D tolerance stack analysis. This package provides the typed
 domain model (:mod:`origlyph.tolerance.models`), the deterministic
@@ -13,8 +13,10 @@ deterministic tolerance-budget compliance analysis
 (:mod:`origlyph.tolerance.budget`), deterministic tolerance allocation
 validation (:mod:`origlyph.tolerance.allocation`), deterministic
 worst-case allocation reconciliation (:mod:`origlyph.tolerance.reconciliation`),
-and deterministic statistical allocation reconciliation
-(:mod:`origlyph.tolerance.statistical_reconciliation`).
+deterministic statistical allocation reconciliation
+(:mod:`origlyph.tolerance.statistical_reconciliation`), and a
+deterministic tolerance decision layer that orchestrates the
+above engines (:mod:`origlyph.tolerance.decision`).
 
 Statistical tolerance analysis does not replace worst-case analysis.
 Sensitivity analysis explains contribution; it does not change
@@ -26,6 +28,9 @@ actual worst-case consumption; it does not generate a new allocation.
 Statistical allocation reconciliation compares a user-supplied sigma
 allocation against actual statistical consumption; it does not generate
 or optimize allocations, nor does it convert worst-case spans into sigma.
+The tolerance decision layer orchestrates existing engines into one
+deterministic engineering decision; it does not replace the underlying
+engines, and it is not an AI recommendation engine.
 
 AI does not override deterministic tolerance calculations.
 """
@@ -36,6 +41,7 @@ from .budget import (
     worst_case_budget,
     worst_case_window_compliance,
 )
+from .decision import evaluate_tolerance_decision
 from .exceptions import (
     InvalidAllocationError,
     InvalidBudgetError,
@@ -43,6 +49,7 @@ from .exceptions import (
     InvalidStackError,
     InvalidStatisticalAllocationError,
     InvalidStatisticalError,
+    InvalidToleranceDecisionError,
     InvalidToleranceError,
     InvalidVarianceError,
     OriglyphToleranceError,
@@ -73,6 +80,16 @@ from .models import (
     StatisticalStack,
     ToleranceAllocation,
     ToleranceContribution,
+    ToleranceDecisionCovarianceEffect,
+    ToleranceDecisionDimension,
+    ToleranceDecisionEvaluationState,
+    ToleranceDecisionEvidence,
+    ToleranceDecisionReason,
+    ToleranceDecisionReasonCode,
+    ToleranceDecisionResult,
+    ToleranceDecisionSensitivity,
+    ToleranceDecisionSeverity,
+    ToleranceDecisionStatus,
     ToleranceStack,
     WorstCaseBudgetResult,
     WorstCaseContributionBudget,
@@ -110,6 +127,7 @@ __all__ = [
     "InvalidStackError",
     "InvalidStatisticalAllocationError",
     "InvalidStatisticalError",
+    "InvalidToleranceDecisionError",
     "InvalidToleranceError",
     "InvalidVarianceError",
     "OriglyphToleranceError",
@@ -131,6 +149,16 @@ __all__ = [
     "StatisticalStack",
     "ToleranceAllocation",
     "ToleranceContribution",
+    "ToleranceDecisionCovarianceEffect",
+    "ToleranceDecisionDimension",
+    "ToleranceDecisionEvaluationState",
+    "ToleranceDecisionEvidence",
+    "ToleranceDecisionReason",
+    "ToleranceDecisionReasonCode",
+    "ToleranceDecisionResult",
+    "ToleranceDecisionSensitivity",
+    "ToleranceDecisionSeverity",
+    "ToleranceDecisionStatus",
     "ToleranceStack",
     "WorstCaseBudgetResult",
     "WorstCaseContributionBudget",
@@ -148,4 +176,5 @@ __all__ = [
     "worst_case_budget",
     "worst_case_sensitivity",
     "worst_case_window_compliance",
+    "evaluate_tolerance_decision",
 ]

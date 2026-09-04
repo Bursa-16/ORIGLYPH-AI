@@ -4,8 +4,8 @@
 
 * **Name:** Origlyph
 * **Current status:** Fourth public alpha — deterministic CAD and datum engineering foundation with first interactive desktop GUI
-* **Package version:** `0.4.0a2`
-* **Current release/tag:** `v0.4.0-alpha.2`
+* **Package version:** `0.4.0a3`
+* **Current release/tag:** `v0.4.0-alpha.3`
 
 ## Purpose
 
@@ -26,13 +26,15 @@ everything else is roadmap, not implementation.
 
 ## Current Development Status
 
-v0.4.0-alpha.2 provides a deterministic geometry foundation, CAD identity and
+v0.4.0-alpha.3 provides a deterministic geometry foundation, CAD identity and
 neutral-model contracts, a concrete STL importer, source-to-neutral
 provenance, a CAD-to-datum candidate bridge, explicit datum/reference
 binding, explicit PRIMARY / SECONDARY / TERTIARY role assignment,
 `DatumReferenceFrame` construction, advisory candidate evaluation,
 the first executable STL datum CLI workflow, the first interactive
-Tkinter desktop GUI, and a deterministic 1D worst-case tolerance engine.
+Tkinter desktop GUI, and a deterministic 1D tolerance analysis stack
+spanning worst-case, statistical (RSS), covariance-aware, sensitivity,
+budget, allocation-validation, and allocation-reconciliation engines.
 
 This release is still alpha. It does **not** claim production readiness,
 certification, ASME/ISO compliance, or validated manufacturing acceptance
@@ -186,7 +188,7 @@ provenance or first-principles derivation.
 * `src/origlyph/cad/` — CAD identity, neutral model, importer protocol, STL importer, bridge, binding, roles, evaluation (implemented)
 * `src/origlyph/datum/` — datum/reference domain: references, DOF, constraints, DRF (implemented)
 * `src/origlyph/gdandt/` — GD&T assistance and automation (reserved, not yet implemented)
-* `src/origlyph/tolerance/` — deterministic 1D worst-case tolerance analysis (implemented)
+* `src/origlyph/tolerance/` — deterministic 1D tolerance analysis: worst-case, statistical (RSS), covariance-aware, sensitivity, budget, allocation validation, allocation reconciliation (implemented)
 * `src/origlyph/assembly/` — assembly-level geometry reasoning (reserved, not yet implemented)
 * `src/origlyph/provenance/` — dedicated provenance layer (reserved; provenance is currently carried inline by the CAD contracts)
 * `src/origlyph/core/` — core engine and orchestration (reserved, not yet implemented)
@@ -239,13 +241,13 @@ py -m ruff check src tests
 py -m pyright
 ```
 
-Verified baseline for v0.4.0-alpha.2: 577 tests passed; Ruff PASS; Pyright PASS.
+Verified baseline for v0.4.0-alpha.3: 774 tests passed; Ruff PASS; Pyright PASS.
 
 ## Release
 
-Current prerelease: `v0.4.0-alpha.2` (package version `0.4.0a2`).
-Release notes: [RELEASE_NOTES_v0.4.0-alpha.2.md](RELEASE_NOTES_v0.4.0-alpha.2.md);
-previous: [RELEASE_NOTES_v0.4.0-alpha.1.md](RELEASE_NOTES_v0.4.0-alpha.1.md).
+Current prerelease: `v0.4.0-alpha.3` (package version `0.4.0a3`).
+Release notes: [RELEASE_NOTES_v0.4.0-alpha.3.md](RELEASE_NOTES_v0.4.0-alpha.3.md);
+previous: [RELEASE_NOTES_v0.4.0-alpha.2.md](RELEASE_NOTES_v0.4.0-alpha.2.md).
 
 ## License
 

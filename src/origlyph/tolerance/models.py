@@ -39,6 +39,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from .exceptions import (
+    InvalidAllocationError,
     InvalidCorrelationError,
     InvalidStackError,
     InvalidStatisticalError,
@@ -692,3 +693,172 @@ class WorstCaseWindowResult:
     allowed_lower: float
     allowed_upper: float
     is_compliant: bool
+
+
+# ---------------------------------------------------------------------------
+# Stage 15H — Deterministic allocation validation models
+# ---------------------------------------------------------------------------
+
+
+class AllocationStatus(Enum):
+    """Status of a user-supplied tolerance allocation plan.
+
+    Allocation status describes whether a *plan* is under-, fully, or
+    over-allocated against its stated budget. It does **not** describe
+    actual engineering consumption; for that see :class:`BudgetStatus`.
+
+    Members
+    -------
+    UNDER_ALLOCATED:
+        ``allocated_total < allowed_budget`` (beyond equality tolerance).
+        Positive remaining unallocated amount.
+    FULLY_ALLOCATED:
+        ``allocated_total`` equals ``allowed_budget`` within the established
+        Origlyph tolerance numerical equality tolerance.
+    OVER_ALLOCATED:
+        ``allocated_total > allowed_budget`` (beyond equality tolerance).
+        Negative remaining unallocated amount.
+    """
+
+    UNDER_ALLOCATED = "under_allocated"
+    FULLY_ALLOCATED = "fully_allocated"
+    OVER_ALLOCATED = "over_allocated"
+
+
+@dataclass(frozen=True)
+class ToleranceAllocation:
+    """A single allocated tolerance span for one contributor.
+
+    Attributes
+    ----------
+    contributor_id:
+        Identifier of the contributor this allocation applies to. Must
+        match a contributor name in the referenced stack exactly.
+    allocated_span:
+        The allocated tolerance span for this contributor. Must be finite
+        and non-negative. NaN and infinity are rejected.
+    """
+
+    contributor_id: str
+    allocated_span: float
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.contributor_id, str) or not self.contributor_id.strip():
+            raise InvalidAllocationError(
+                "contributor_id must be a non-empty string, "
+                f"got {self.contributor_id!r}"
+            )
+        try:
+            object.__setattr__(
+                self,
+                "allocated_span",
+                _validate_finite(self.allocated_span, "allocated_span"),
+            )
+        except InvalidToleranceError as exc:
+            raise InvalidAllocationError(str(exc)) from exc
+        if self.allocated_span < 0.0:
+            raise InvalidAllocationError(
+                f"allocated_span must be non-negative, got {self.allocated_span}"
+            )
+
+
+@dataclass(frozen=True)
+class AllocationPlan:
+    """A user-supplied tolerance allocation plan.
+
+    Attributes
+    ----------
+    allowed_budget:
+        The total tolerance budget allowed for this allocation plan. Must
+        be finite and strictly positive.
+    allocations:
+        The per-contributor allocation entries. Each contributor may appear
+        at most once; duplicate contributor IDs are rejected.
+    """
+
+    allowed_budget: float
+    allocations: tuple[ToleranceAllocation, ...]
+
+    def __post_init__(self) -> None:
+        if math.isnan(self.allowed_budget) or math.isinf(self.allowed_budget):
+            raise InvalidAllocationError(
+                "allowed_budget must be a finite number, "
+                f"got {'NaN' if math.isnan(self.allowed_budget) else 'infinity'}"
+            )
+        if self.allowed_budget <= 0.0:
+            raise InvalidAllocationError(
+                f"allowed_budget must be strictly positive, got {self.allowed_budget}"
+            )
+        seen: set[str] = set()
+        for allocation in self.allocations:
+            if allocation.contributor_id in seen:
+                raise InvalidAllocationError(
+                    f"duplicate contributor_id: {allocation.contributor_id!r}"
+                )
+            seen.add(allocation.contributor_id)
+
+
+@dataclass(frozen=True)
+class AllocationContributorResult:
+    """Per-contributor comparison between allocated and current spans.
+
+    Attributes
+    ----------
+    contributor_id:
+        Identifier of the contributor.
+    allocated_span:
+        The span allocated to this contributor in the plan.
+    current_span:
+        The current tolerance span of this contributor in the stack,
+        derived using the same semantics as Stage 15F / Stage 15G.
+    delta_from_current:
+        ``allocated_span - current_span``.
+    fraction_of_allowed_budget:
+        ``allocated_span / allowed_budget``.
+    """
+
+    contributor_id: str
+    allocated_span: float
+    current_span: float
+    delta_from_current: float
+    fraction_of_allowed_budget: float
+
+
+@dataclass(frozen=True)
+class AllocationValidationResult:
+    """Result of validating a user-supplied allocation plan.
+
+    Attributes
+    ----------
+    allowed_budget:
+        The total tolerance budget allowed (from the plan).
+    allocated_total:
+        Sum of all allocated spans.
+    remaining_unallocated:
+        ``allowed_budget - allocated_total``.
+    utilization_fraction:
+        ``allocated_total / allowed_budget``.
+    utilization_percentage:
+        ``100 * utilization_fraction``.
+    status:
+        ``UNDER_ALLOCATED``, ``FULLY_ALLOCATED``, or ``OVER_ALLOCATED``.
+    is_complete:
+        ``True`` when every stack contributor appears exactly once in
+        the plan (or when ``require_complete=False`` and no unknown
+        contributors are present).
+    contributor_results:
+        Per-contributor comparison results, in deterministic input order.
+    missing_contributors:
+        Stack contributor IDs not present in the plan (empty when
+        ``is_complete`` is ``True``).
+    """
+
+    allowed_budget: float
+    allocated_total: float
+    remaining_unallocated: float
+    utilization_fraction: float
+    utilization_percentage: float
+    status: AllocationStatus
+    is_complete: bool
+    contributor_results: tuple[AllocationContributorResult, ...]
+    missing_contributors: tuple[str, ...]

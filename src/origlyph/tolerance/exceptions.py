@@ -60,3 +60,12 @@ class InvalidBudgetError(OriglyphToleranceError):
     Examples: non-positive, non-finite, or NaN allowed span;
     non-finite or NaN allowed window bounds; invalid window ordering.
     """
+
+
+class InvalidAllocationError(OriglyphToleranceError):
+    """Raised when a tolerance allocation plan is invalid.
+
+    Examples: non-positive or non-finite allowed budget; negative or
+    non-finite allocated span; duplicate contributor IDs; unknown
+    contributor references; malformed or ambiguous identifiers.
+    """

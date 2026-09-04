@@ -69,3 +69,13 @@ class InvalidAllocationError(OriglyphToleranceError):
     non-finite allocated span; duplicate contributor IDs; unknown
     contributor references; malformed or ambiguous identifiers.
     """
+
+
+class InvalidStatisticalAllocationError(OriglyphToleranceError):
+    """Raised when a statistical tolerance allocation plan is invalid.
+
+    Examples: non-finite or non-positive sigma multiplier; negative or
+    non-finite allocated sigma; duplicate contributor IDs; unknown
+    contributor references in a statistical stack; malformed statistical
+    allocation plans.
+    """

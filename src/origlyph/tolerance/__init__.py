@@ -1,6 +1,6 @@
 ﻿"""Origlyph tolerance analysis package.
 
-Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I.
+Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J.
 
 Deterministic 1D tolerance stack analysis. This package provides the typed
 domain model (:mod:`origlyph.tolerance.models`), the deterministic
@@ -11,16 +11,21 @@ covariance-aware correlated statistical propagation via
 and contributor-impact analysis (:mod:`origlyph.tolerance.sensitivity`),
 deterministic tolerance-budget compliance analysis
 (:mod:`origlyph.tolerance.budget`), deterministic tolerance allocation
-validation (:mod:`origlyph.tolerance.allocation`), and deterministic
-allocation reconciliation (:mod:`origlyph.tolerance.reconciliation`).
+validation (:mod:`origlyph.tolerance.allocation`), deterministic
+worst-case allocation reconciliation (:mod:`origlyph.tolerance.reconciliation`),
+and deterministic statistical allocation reconciliation
+(:mod:`origlyph.tolerance.statistical_reconciliation`).
 
 Statistical tolerance analysis does not replace worst-case analysis.
 Sensitivity analysis explains contribution; it does not change
 authoritative tolerance results. Budget analysis evaluates compliance;
 it does not automatically redistribute tolerances. Allocation validation
 checks a user-supplied plan; it does not generate or optimize allocations.
-Allocation reconciliation compares a validated plan against actual
-consumption; it does not generate a new allocation.
+Worst-case allocation reconciliation compares a validated plan against
+actual worst-case consumption; it does not generate a new allocation.
+Statistical allocation reconciliation compares a user-supplied sigma
+allocation against actual statistical consumption; it does not generate
+or optimize allocations, nor does it convert worst-case spans into sigma.
 
 AI does not override deterministic tolerance calculations.
 """
@@ -36,6 +41,7 @@ from .exceptions import (
     InvalidBudgetError,
     InvalidCorrelationError,
     InvalidStackError,
+    InvalidStatisticalAllocationError,
     InvalidStatisticalError,
     InvalidToleranceError,
     InvalidVarianceError,
@@ -53,9 +59,16 @@ from .models import (
     Correlation,
     ReconciliationStatus,
     StackDirection,
+    StatisticalAllocation,
+    StatisticalAllocationCovarianceImpact,
+    StatisticalAllocationPlan,
+    StatisticalAllocationReconciliationResult,
+    StatisticalAllocationReconciliationStatus,
+    StatisticalAllocationStatus,
     StatisticalBudgetResult,
     StatisticalContribution,
     StatisticalContributionBudget,
+    StatisticalContributorCompliance,
     StatisticalResult,
     StatisticalStack,
     ToleranceAllocation,
@@ -77,6 +90,7 @@ from .sensitivity import (
     worst_case_sensitivity,
 )
 from .statistical import statistical
+from .statistical_reconciliation import reconcile_statistical_allocation
 from .worst_case import worst_case
 
 __all__ = [
@@ -94,15 +108,23 @@ __all__ = [
     "InvalidBudgetError",
     "InvalidCorrelationError",
     "InvalidStackError",
+    "InvalidStatisticalAllocationError",
     "InvalidStatisticalError",
     "InvalidToleranceError",
     "InvalidVarianceError",
     "OriglyphToleranceError",
-    "ReconciliationStatus",
+        "ReconciliationStatus",
     "StackDirection",
+    "StatisticalAllocation",
+    "StatisticalAllocationCovarianceImpact",
+    "StatisticalAllocationPlan",
+    "StatisticalAllocationReconciliationResult",
+        "StatisticalAllocationReconciliationStatus",
+    "StatisticalAllocationStatus",
     "StatisticalBudgetResult",
     "StatisticalContribution",
     "StatisticalContributionBudget",
+    "StatisticalContributorCompliance",
     "StatisticalContributionImpact",
     "StatisticalResult",
     "StatisticalSensitivityResult",
@@ -116,7 +138,8 @@ __all__ = [
     "WorstCaseResult",
     "WorstCaseSensitivityResult",
     "WorstCaseWindowResult",
-    "reconcile_allocation",
+        "reconcile_allocation",
+    "reconcile_statistical_allocation",
     "statistical",
     "statistical_budget",
     "statistical_sensitivity",

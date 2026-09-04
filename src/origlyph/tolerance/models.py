@@ -42,6 +42,7 @@ from .exceptions import (
     InvalidAllocationError,
     InvalidCorrelationError,
     InvalidStackError,
+    InvalidStatisticalAllocationError,
     InvalidStatisticalError,
     InvalidToleranceError,
 )
@@ -979,3 +980,296 @@ class AllocationReconciliationResult:
     engineering_budget_status: BudgetStatus
     reconciliation_status: ReconciliationStatus
     contributor_compliances: tuple[ContributorAllocationCompliance, ...]
+
+
+# ===========================================================================
+# Stage 15J — Deterministic Statistical Allocation Reconciliation
+# ===========================================================================
+#
+# This section adds typed immutable domain contracts for reconciling a
+# user-supplied *statistical* allocation plan against *actual* statistical
+# uncertainty consumption produced by the authoritative Stage 15D/15E engine.
+#
+# A statistical allocation plan is conceptually distinct from the worst-case
+# AllocationPlan (Stage 15H): it allocates standard-deviation (sigma) budgets,
+# not linear worst-case spans.  Comparing allocated sigma with actual sigma
+# is the correct statistical reconciliation; worst-case spans and statistical
+# sigmas are different physical quantities and are never interchanged.
+
+
+class StatisticalAllocationStatus(Enum):
+    """Per-contributor statistical allocation compliance status.
+
+    Allocation status describes whether a *plan's sigma allocation* for a
+    single contributor is under, at, or over the contributor's *actual sigma*.
+
+    It does **not** describe worst-case span consumption; for that see
+    :class:`AllocationComplianceStatus` (Stage 15I).
+
+    Members
+    -------
+    UNDER_ALLOCATION:
+        ``actual_sigma < allocated_sigma`` (beyond equality tolerance).
+        Positive sigma margin.
+    AT_ALLOCATION:
+        ``actual_sigma`` equals ``allocated_sigma`` within tolerance, or
+        both are zero.
+    OVER_ALLOCATION:
+        ``actual_sigma > allocated_sigma`` (beyond tolerance). Negative margin.
+        Also used when ``allocated_sigma == 0`` and ``actual_sigma > 0``.
+    """
+
+    UNDER_ALLOCATION = "under_allocation"
+    AT_ALLOCATION = "at_allocation"
+    OVER_ALLOCATION = "over_allocation"
+
+
+class StatisticalAllocationReconciliationStatus(Enum):
+    """Total statistical reconciliation status.
+
+    Between the allocation plan and the actual statistical consumption.
+
+    Members
+    -------
+    ACTUAL_WITHIN_ALLOCATION:
+        ``actual_combined_sigma < allocated_combined_sigma`` (beyond tolerance).
+        Positive combined sigma margin.
+    ACTUAL_AT_ALLOCATION:
+        ``actual_combined_sigma`` equals ``allocated_combined_sigma`` within
+        tolerance.
+    ACTUAL_EXCEEDS_ALLOCATION:
+        ``actual_combined_sigma > allocated_combined_sigma`` (beyond tolerance).
+        Negative combined sigma margin.
+    """
+
+    ACTUAL_WITHIN_ALLOCATION = "actual_within_allocation"
+    ACTUAL_AT_ALLOCATION = "actual_at_allocation"
+    ACTUAL_EXCEEDS_ALLOCATION = "actual_exceeds_allocation"
+
+
+class StatisticalReconciliationEquality:
+    """Constant: absolute tolerance reused for statistical reconciliation equality.
+
+    Reuses the same deterministic engineering equality tolerance as Stage 15G
+    (``_BUDGET_EQUALITY_TOLERANCE = 1e-12``) and Stage 15H
+    (``_ALLOCATION_EQUALITY_TOLERANCE = 1e-12``).  No new or contradictory
+    epsilon is introduced for Stage 15J.
+    """
+
+    TOLERANCE = 1e-12
+
+
+@dataclass(frozen=True)
+class StatisticalAllocation:
+    """A single statistical allocation (sigma budget) for one contributor.
+
+    ``allocated_sigma`` is the standard-deviation budget allocated to the
+    contributor. It is a different physical quantity from the worst-case
+    ``allocated_span`` defined in :class:`~origlyph.tolerance.ToleranceAllocation`.
+
+    Attributes
+    ----------
+    contributor_id:
+        Identifier of the contributor this allocation applies to. Must
+        match a contributor name in the referenced statistical stack.
+    allocated_sigma:
+        The allocated standard deviation (sigma) for this contributor.
+        Must be finite and non-negative. Zero is permitted. NaN and
+        infinity are rejected.
+    """
+
+    contributor_id: str
+    allocated_sigma: float
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.contributor_id, str) or not self.contributor_id.strip():
+            raise InvalidStatisticalAllocationError(
+                "contributor_id must be a non-empty string"
+            )
+        object.__setattr__(
+            self,
+            "allocated_sigma",
+            _validate_finite(
+                self.allocated_sigma,
+                "allocated_sigma",
+                InvalidStatisticalAllocationError,
+            ),
+        )
+        if self.allocated_sigma < 0.0:
+            raise InvalidStatisticalAllocationError(
+                f"allocated_sigma must be non-negative, got {self.allocated_sigma}"
+            )
+
+
+@dataclass(frozen=True)
+class StatisticalAllocationPlan:
+    """A user-supplied statistical allocation plan.
+
+    The plan assigns a per-contributor sigma budget and optionally a
+    total combined-sigma budget.  It is validated independently of any
+    stack; the caller may also validate it against a specific stack via
+    the statistical reconciliation entry point.
+
+    Attributes
+    ----------
+    sigma_multiplier:
+        Sigma multiplier ``k`` applied to the combined sigma for interval
+        bound computation. Must be finite and strictly positive. Common
+        values are 1, 2, or 3.
+    allocations:
+        Per-contributor sigma allocations. Each contributor may appear at
+        most once; duplicate IDs are rejected.
+    allowed_combined_sigma:
+        Optional total combined-sigma budget. If supplied, must be finite
+        and strictly positive. When omitted (``None``), total reconciliation
+        uses the RSS of per-contributor allocations as the authoritative
+        allocation-side combined sigma.
+    """
+
+    sigma_multiplier: float
+    allocations: tuple[StatisticalAllocation, ...]
+    allowed_combined_sigma: float | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "sigma_multiplier",
+            _validate_finite(
+                self.sigma_multiplier,
+                "sigma_multiplier",
+                InvalidStatisticalAllocationError,
+            ),
+        )
+        if self.sigma_multiplier <= 0.0:
+            raise InvalidStatisticalAllocationError(
+                f"sigma_multiplier must be strictly positive, "
+                f"got {self.sigma_multiplier}"
+            )
+        seen: set[str] = set()
+        for allocation in self.allocations:
+            if allocation.contributor_id in seen:
+                raise InvalidStatisticalAllocationError(
+                    f"duplicate contributor_id: {allocation.contributor_id!r}"
+                )
+            seen.add(allocation.contributor_id)
+        if self.allowed_combined_sigma is not None:
+            object.__setattr__(
+                self,
+                "allowed_combined_sigma",
+                _validate_finite(
+                    self.allowed_combined_sigma,
+                    "allowed_combined_sigma",
+                    InvalidStatisticalAllocationError,
+                                ),
+            )
+            if self.allowed_combined_sigma <= 0.0:
+                raise InvalidStatisticalAllocationError(
+                    f"allowed_combined_sigma must be strictly positive, "
+                    f"got {self.allowed_combined_sigma}"
+                )
+
+
+@dataclass(frozen=True)
+class StatisticalAllocationCovarianceImpact:
+    """Signed covariance-pair impact within a correlated statistical allocation.
+
+    Exposes the contribution of a pairwise correlation to the
+    allocation-side variance so that the origin of every covariance term
+    is traceable.
+
+    Attributes
+    ----------
+    first_contributor:
+        The lexicographically-first contributor name in the pair.
+    second_contributor:
+        The lexicographically-second contributor name in the pair.
+    coefficient:
+        Pearson correlation coefficient rho for the allocation plan.
+    variance_contribution:
+        The signed term
+        ``2 * a_i * a_j * rho * alloc_sigma_i * alloc_sigma_j`` added to
+        the allocation-side variance.
+    """
+
+    first_contributor: str
+    second_contributor: str
+    coefficient: float
+    variance_contribution: float
+
+
+@dataclass(frozen=True)
+class StatisticalContributorCompliance:
+    """Per-contributor statistical allocation-vs-actual compliance.
+
+    Attributes
+    ----------
+    contributor_id:
+        Identifier of the contributor.
+    allocated_sigma:
+        The sigma allocated to this contributor in the plan.
+    actual_sigma:
+        The actual sigma of this contributor from the statistical stack.
+    sigma_margin:
+        ``allocated_sigma - actual_sigma``. Positive means unused room.
+    utilization_fraction:
+        ``actual_sigma / allocated_sigma`` when ``allocated_sigma > 0``;
+        ``None`` when ``allocated_sigma == 0`` (division by zero avoided).
+    utilization_percentage:
+        ``100 * utilization_fraction`` when defined; ``None`` otherwise.
+    status:
+        ``UNDER_ALLOCATION``, ``AT_ALLOCATION``, or ``OVER_ALLOCATION``.
+    """
+
+    contributor_id: str
+    allocated_sigma: float
+    actual_sigma: float
+    sigma_margin: float
+    utilization_fraction: float | None
+    utilization_percentage: float | None
+    status: StatisticalAllocationStatus
+
+
+@dataclass(frozen=True)
+class StatisticalAllocationReconciliationResult:
+    """Result of reconciling a statistical allocation plan against actual consumption.
+
+    Attributes
+    ----------
+    sigma_multiplier:
+        The sigma multiplier ``k`` used for bound computation.
+    allocated_combined_sigma:
+        RSS (or correlated) combined sigma derived from the allocation plan.
+    actual_combined_sigma:
+        Combined sigma from the authoritative Stage 15D/15E engine.
+    combined_sigma_margin:
+        ``allocated_combined_sigma - actual_combined_sigma``.  Positive
+        means the allocation has unused room; negative means the actual
+        consumption exceeds the allocation.
+    allocation_plan_status:
+        Status of the allocation plan against its stated budget
+        (``AllocationStatus`` from Stage 15H).
+    actual_statistical_status:
+        Whether actual combined sigma is within, at, or exceeds the
+        allocation-side combined sigma.
+    contributor_compliances:
+        Per-contributor compliance results, in deterministic stack order.
+    correlation_impacts:
+        Signed covariance-pair impacts for the allocation-side variance.
+        Empty for independent-mode reconciliation.
+    missing_contributors:
+        Contributor IDs present in the stack but absent from the allocation
+        plan (only non-empty when ``require_complete=False``).
+    is_complete:
+        Whether every stack contributor has a corresponding allocation.
+    """
+
+    sigma_multiplier: float
+    allocated_combined_sigma: float
+    actual_combined_sigma: float
+    combined_sigma_margin: float
+    allocation_plan_status: AllocationStatus
+    actual_statistical_status: StatisticalAllocationReconciliationStatus
+    contributor_compliances: tuple[StatisticalContributorCompliance, ...]
+    correlation_impacts: tuple[StatisticalAllocationCovarianceImpact, ...]
+    missing_contributors: tuple[str, ...]
+    is_complete: bool

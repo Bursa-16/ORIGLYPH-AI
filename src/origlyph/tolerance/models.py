@@ -862,3 +862,120 @@ class AllocationValidationResult:
     is_complete: bool
     contributor_results: tuple[AllocationContributorResult, ...]
     missing_contributors: tuple[str, ...]
+
+
+# ---------------------------------------------------------------------------
+# Stage 15I — Deterministic allocation reconciliation models
+# ---------------------------------------------------------------------------
+
+
+class AllocationComplianceStatus(Enum):
+    """Per-contributor allocation compliance status.
+
+    Describes whether actual tolerance consumption is within, at, or
+    exceeding the allocated span for a single contributor.
+
+    Members
+    -------
+    UNDER_ALLOCATION:
+        ``actual_span < allocated_span`` (beyond tolerance). Positive margin.
+    AT_ALLOCATION:
+        ``actual_span`` equals ``allocated_span`` within tolerance.
+    OVER_ALLOCATION:
+        ``actual_span > allocated_span`` (beyond tolerance). Negative margin.
+        Also used when ``allocated_span == 0`` and ``actual_span > 0``.
+    """
+
+    UNDER_ALLOCATION = "under_allocation"
+    AT_ALLOCATION = "at_allocation"
+    OVER_ALLOCATION = "over_allocation"
+
+
+class ReconciliationStatus(Enum):
+    """Total reconciliation status between allocated plan and actual consumption.
+
+    Members
+    -------
+    ACTUAL_WITHIN_ALLOCATION:
+        ``actual_total_span < allocated_total`` (beyond tolerance).
+    ACTUAL_AT_ALLOCATION:
+        ``actual_total_span`` equals ``allocated_total`` within tolerance.
+    ACTUAL_EXCEEDS_ALLOCATION:
+        ``actual_total_span > allocated_total`` (beyond tolerance).
+    """
+
+    ACTUAL_WITHIN_ALLOCATION = "actual_within_allocation"
+    ACTUAL_AT_ALLOCATION = "actual_at_allocation"
+    ACTUAL_EXCEEDS_ALLOCATION = "actual_exceeds_allocation"
+
+
+@dataclass(frozen=True)
+class ContributorAllocationCompliance:
+    """Per-contributor allocation-vs-actual compliance.
+
+    Attributes
+    ----------
+    contributor_id:
+        Identifier of the contributor.
+    allocated_span:
+        The span allocated to this contributor in the plan.
+    actual_span:
+        The actual tolerance span consumed by this contributor.
+    margin:
+        ``allocated_span - actual_span``. Positive means unused room.
+    utilization_fraction:
+        ``actual_span / allocated_span`` when ``allocated_span > 0``;
+        ``None`` when ``allocated_span == 0`` (division by zero avoided).
+    utilization_percentage:
+        ``100 * utilization_fraction`` when defined; ``None`` otherwise.
+    status:
+        ``UNDER_ALLOCATION``, ``AT_ALLOCATION``, or ``OVER_ALLOCATION``.
+    """
+
+    contributor_id: str
+    allocated_span: float
+    actual_span: float
+    margin: float
+    utilization_fraction: float | None
+    utilization_percentage: float | None
+    status: AllocationComplianceStatus
+
+
+@dataclass(frozen=True)
+class AllocationReconciliationResult:
+    """Result of reconciling a validated allocation plan against actual consumption.
+
+    Attributes
+    ----------
+    allowed_budget:
+        The total tolerance budget allowed (from the plan).
+    allocated_total:
+        Sum of all allocated spans.
+    actual_total_span:
+        Sum of all actual contributor spans.
+    allocation_remaining:
+        ``allowed_budget - allocated_total``.
+    engineering_remaining_margin:
+        ``allowed_budget - actual_total_span``.
+    total_allocation_margin:
+        ``allocated_total - actual_total_span``.
+    allocation_plan_status:
+        Status of the allocation plan (from Stage 15H validation).
+    engineering_budget_status:
+        Status of actual consumption vs allowed budget.
+    reconciliation_status:
+        Total reconciliation status (actual vs allocated).
+    contributor_compliances:
+        Per-contributor compliance results, in deterministic stack order.
+    """
+
+    allowed_budget: float
+    allocated_total: float
+    actual_total_span: float
+    allocation_remaining: float
+    engineering_remaining_margin: float
+    total_allocation_margin: float
+    allocation_plan_status: AllocationStatus
+    engineering_budget_status: BudgetStatus
+    reconciliation_status: ReconciliationStatus
+    contributor_compliances: tuple[ContributorAllocationCompliance, ...]

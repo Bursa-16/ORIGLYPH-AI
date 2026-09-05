@@ -59,6 +59,12 @@ from .exceptions import InvalidToleranceDecisionError
 from .models import (
     AllocationPlan,
     Correlation,
+    DecisionAllocationMissingContributorObservation,
+    DecisionCovariancePairObservation,
+    DecisionReconciliationObservation,
+    DecisionStatisticalContributionObservation,
+    DecisionStatisticalReconciliationObservation,
+    DecisionWorstCaseContributionObservation,
     StatisticalAllocationPlan,
     StatisticalStack,
     ToleranceDecisionCovarianceEffect,
@@ -741,6 +747,150 @@ def evaluate_tolerance_decision(  # noqa: C901
         equality_tolerance=_EQUALITY_TOLERANCE,
     )
 
+    # ============================================================
+    # Stage 15L source snapshots (split A: WC + statistical + covariance)
+    # ============================================================
+
+    worst_case_contributor_snapshots: tuple[
+        DecisionWorstCaseContributionObservation, ...
+    ] = ()
+    if worst_case_stack is not None:
+        _wc_sensitivity = worst_case_sensitivity(worst_case_stack)
+        worst_case_contributor_snapshots = tuple(
+            DecisionWorstCaseContributionObservation(
+                name=impact.name,
+                span=impact.span,
+                fraction=impact.fraction,
+                percentage=impact.percentage,
+                rank=rank,
+            )
+            for rank, impact in enumerate(_wc_sensitivity.impacts, start=1)
+        )
+
+    statistical_contributor_snapshots: tuple[
+        DecisionStatisticalContributionObservation, ...
+    ] = ()
+    covariance_pair_snapshots: tuple[
+        DecisionCovariancePairObservation, ...
+    ] = ()
+    if statistical_stack is not None:
+        _stat_sensitivity = statistical_sensitivity(
+            statistical_stack,
+            sigma_multiplier=k,
+            correlations=correlations,
+        )
+        statistical_contributor_snapshots = tuple(
+            DecisionStatisticalContributionObservation(
+                name=impact.name,
+                sigma=impact.sigma,
+                variance=impact.variance,
+                fraction=impact.fraction,
+                percentage=impact.percentage,
+                rank=rank,
+            )
+            for rank, impact in enumerate(_stat_sensitivity.contributions, start=1)
+        )
+        covariance_pair_snapshots = tuple(
+            DecisionCovariancePairObservation(
+                first=pair.first,
+                second=pair.second,
+                rho=pair.rho,
+                covariance_term=pair.covariance_term,
+                fraction=pair.fraction,
+                percentage=pair.percentage,
+                rank=rank,
+            )
+            for rank, pair in enumerate(_stat_sensitivity.covariance_pairs, start=1)
+        )
+
+    worst_case_reconciliation_snapshots: tuple[
+        DecisionReconciliationObservation, ...
+    ] = ()
+    allocation_missing_contributor_snapshots: tuple[
+        DecisionAllocationMissingContributorObservation, ...
+    ] = ()
+
+    if worst_case_stack is not None and worst_case_allocation is not None:
+        _wc_recon_snapshot = reconcile_allocation(
+            worst_case_stack, worst_case_allocation,
+            require_complete=require_complete,
+        )
+        _wc_validation_snapshot = validate_allocation(
+            worst_case_stack, worst_case_allocation,
+            require_complete=require_complete,
+        )
+        _ranked_wc_snapshot = sorted(
+            _wc_recon_snapshot.contributor_compliances,
+            key=lambda c: c.actual_span,
+            reverse=True,
+        )
+        worst_case_reconciliation_snapshots = tuple(
+            DecisionReconciliationObservation(
+                contributor_id=cc.contributor_id,
+                actual_span=cc.actual_span,
+                allocated_span=cc.allocated_span,
+                margin=cc.margin,
+                utilization_fraction=cc.utilization_fraction,
+                utilization_percentage=cc.utilization_percentage,
+                status=cc.status.name,
+                rank=rank,
+            )
+            for rank, cc in enumerate(_ranked_wc_snapshot, start=1)
+        )
+        allocation_missing_contributor_snapshots = tuple(
+            DecisionAllocationMissingContributorObservation(
+                contributor_id=cid, rank=rank,
+            )
+            for rank, cid in enumerate(
+                _wc_validation_snapshot.missing_contributors, start=1,
+            )
+        )
+
+    statistical_reconciliation_snapshots: tuple[
+        DecisionStatisticalReconciliationObservation, ...
+    ] = ()
+    if statistical_stack is not None and statistical_allocation is not None:
+        _stat_recon_snapshot = reconcile_statistical_allocation(
+            statistical_stack,
+            statistical_allocation,
+            correlations=correlations,
+            require_complete=require_complete,
+        )
+        _ranked_stat_snapshot = sorted(
+            _stat_recon_snapshot.contributor_compliances,
+            key=lambda c: c.actual_sigma,
+            reverse=True,
+        )
+        statistical_reconciliation_snapshots = tuple(
+            DecisionStatisticalReconciliationObservation(
+                contributor_id=cc.contributor_id,
+                actual_sigma=cc.actual_sigma,
+                allocated_sigma=cc.allocated_sigma,
+                margin=cc.sigma_margin,
+                status=cc.status.name,
+                rank=rank,
+            )
+            for rank, cc in enumerate(_ranked_stat_snapshot, start=1)
+        )
+        if _stat_recon_snapshot.missing_contributors:
+            existing = {
+                m.contributor_id for m in allocation_missing_contributor_snapshots
+            }
+            next_rank = len(allocation_missing_contributor_snapshots) + 1
+            stat_only = tuple(
+                DecisionAllocationMissingContributorObservation(
+                    contributor_id=cid, rank=rank,
+                )
+                for rank, cid in enumerate(
+                    _stat_recon_snapshot.missing_contributors, start=next_rank,
+                )
+                if cid not in existing
+            )
+            if stat_only:
+                allocation_missing_contributor_snapshots = (
+                    allocation_missing_contributor_snapshots + stat_only
+                )
+
     return ToleranceDecisionResult(
         overall_status=overall,
         dimensions=tuple(dimensions),
@@ -753,4 +903,10 @@ def evaluate_tolerance_decision(  # noqa: C901
         evidence=evidence,
         reasons=tuple(reasons),
         is_complete=not any_incomplete,
+        worst_case_contributor_snapshots=worst_case_contributor_snapshots,
+        statistical_contributor_snapshots=statistical_contributor_snapshots,
+        covariance_pair_snapshots=covariance_pair_snapshots,
+        worst_case_reconciliation_snapshots=worst_case_reconciliation_snapshots,
+        statistical_reconciliation_snapshots=statistical_reconciliation_snapshots,
+        allocation_missing_contributor_snapshots=allocation_missing_contributor_snapshots,
     )

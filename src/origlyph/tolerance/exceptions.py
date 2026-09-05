@@ -88,3 +88,12 @@ class InvalidToleranceDecisionError(OriglyphToleranceError):
     allowed window not supplied; malformed decision inputs that cannot
     be processed by the existing deterministic engines.
     """
+
+
+class InvalidDecisionEvidenceError(OriglyphToleranceError):
+    """Raised when deterministic decision evidence cannot be produced.
+
+    Examples: a triggered Stage 15K reason code lacks the supporting
+    source observation needed for explainability; required snapshot data
+    is absent; an unsupported source enumeration is requested.
+    """

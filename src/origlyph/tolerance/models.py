@@ -1487,6 +1487,121 @@ class ToleranceDecisionEvidence:
     equality_tolerance: float
 
 
+
+
+
+@dataclass(frozen=True)
+class DecisionWorstCaseContributionObservation:
+    """Stage 15L source snapshot of one contributor's worst-case impact."""
+
+    name: str
+    span: float
+    fraction: float
+    percentage: float
+    rank: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("name must be a non-empty string")
+        if not isinstance(self.rank, int) or self.rank < 1:
+            raise ValueError("rank must be a strictly positive integer")
+
+
+@dataclass(frozen=True)
+class DecisionStatisticalContributionObservation:
+    """Stage 15L source snapshot of one contributor's variance impact."""
+
+    name: str
+    sigma: float
+    variance: float
+    fraction: float
+    percentage: float
+    rank: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("name must be a non-empty string")
+        if not isinstance(self.rank, int) or self.rank < 1:
+            raise ValueError("rank must be a strictly positive integer")
+
+
+@dataclass(frozen=True)
+class DecisionCovariancePairObservation:
+    """Stage 15L source snapshot of one pairwise covariance contribution."""
+
+    first: str
+    second: str
+    rho: float
+    covariance_term: float
+    fraction: float
+    percentage: float
+    rank: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.first, str) or not self.first.strip():
+            raise ValueError("first must be a non-empty string")
+        if not isinstance(self.second, str) or not self.second.strip():
+            raise ValueError("second must be a non-empty string")
+        if self.first > self.second:
+            raise ValueError("covariance pair must be canonicalised (first <= second)")
+        if not isinstance(self.rank, int) or self.rank < 1:
+            raise ValueError("rank must be a strictly positive integer")
+
+
+@dataclass(frozen=True)
+class DecisionReconciliationObservation:
+    """Stage 15L source snapshot of one contributor's worst-case allocation
+    reconciliation."""
+
+    contributor_id: str
+    actual_span: float
+    allocated_span: float
+    margin: float
+    utilization_fraction: float | None
+    utilization_percentage: float | None
+    status: str
+    rank: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.contributor_id, str) or not self.contributor_id.strip():
+            raise ValueError("contributor_id must be a non-empty string")
+        if not isinstance(self.rank, int) or self.rank < 1:
+            raise ValueError("rank must be a strictly positive integer")
+
+
+@dataclass(frozen=True)
+class DecisionStatisticalReconciliationObservation:
+    """Stage 15L source snapshot of one contributor's statistical allocation
+    reconciliation."""
+
+    contributor_id: str
+    actual_sigma: float
+    allocated_sigma: float
+    margin: float
+    status: str
+    rank: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.contributor_id, str) or not self.contributor_id.strip():
+            raise ValueError("contributor_id must be a non-empty string")
+        if not isinstance(self.rank, int) or self.rank < 1:
+            raise ValueError("rank must be a strictly positive integer")
+
+
+@dataclass(frozen=True)
+class DecisionAllocationMissingContributorObservation:
+    """Stage 15L source snapshot of a missing allocation contributor."""
+
+    contributor_id: str
+    rank: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.contributor_id, str) or not self.contributor_id.strip():
+            raise ValueError("contributor_id must be a non-empty string")
+        if not isinstance(self.rank, int) or self.rank < 1:
+            raise ValueError("rank must be a strictly positive integer")
+
+
 @dataclass(frozen=True)
 class ToleranceDecisionDimension:
     """A single evaluation dimension within a decision result.
@@ -1501,6 +1616,24 @@ class ToleranceDecisionDimension:
     actual: float | None
     allowed: float | None
     margin: float | None
+
+
+def _validate_snapshot_tuple(
+    items: tuple[object, ...],
+    expected_type: type,
+    field_name: str,
+) -> None:
+    """Reject tuple members that are not ``expected_type``.
+
+    Used by :class:`ToleranceDecisionResult.__post_init__` to keep the
+    method complexity flat (Stage 15L).  Raises ``ValueError`` on the
+    first offending index.
+    """
+    for i, item in enumerate(items):
+        if not isinstance(item, expected_type):
+            raise ValueError(
+                f"{field_name}[{i}] must be a {expected_type.__name__}"
+            )
 
 
 @dataclass(frozen=True)
@@ -1557,3 +1690,55 @@ class ToleranceDecisionResult:
     evidence: ToleranceDecisionEvidence
     reasons: tuple[ToleranceDecisionReason, ...]
     is_complete: bool
+    worst_case_contributor_snapshots: tuple[
+        DecisionWorstCaseContributionObservation, ...
+    ] = ()
+    statistical_contributor_snapshots: tuple[
+        DecisionStatisticalContributionObservation, ...
+    ] = ()
+    covariance_pair_snapshots: tuple[
+        DecisionCovariancePairObservation, ...
+    ] = ()
+    worst_case_reconciliation_snapshots: tuple[
+        DecisionReconciliationObservation, ...
+    ] = ()
+    statistical_reconciliation_snapshots: tuple[
+        DecisionStatisticalReconciliationObservation, ...
+    ] = ()
+    allocation_missing_contributor_snapshots: tuple[
+        DecisionAllocationMissingContributorObservation, ...
+    ] = ()
+
+    def __post_init__(self) -> None:
+        # Stage 15L source-snapshot tuple validation.  Each tuple is
+        # type-checked independently to keep the post-init body flat.
+        _validate_snapshot_tuple(
+            self.worst_case_contributor_snapshots,
+            DecisionWorstCaseContributionObservation,
+            "worst_case_contributor_snapshots",
+        )
+        _validate_snapshot_tuple(
+            self.statistical_contributor_snapshots,
+            DecisionStatisticalContributionObservation,
+            "statistical_contributor_snapshots",
+        )
+        _validate_snapshot_tuple(
+            self.covariance_pair_snapshots,
+            DecisionCovariancePairObservation,
+            "covariance_pair_snapshots",
+        )
+        _validate_snapshot_tuple(
+            self.worst_case_reconciliation_snapshots,
+            DecisionReconciliationObservation,
+            "worst_case_reconciliation_snapshots",
+        )
+        _validate_snapshot_tuple(
+            self.statistical_reconciliation_snapshots,
+            DecisionStatisticalReconciliationObservation,
+            "statistical_reconciliation_snapshots",
+        )
+        _validate_snapshot_tuple(
+            self.allocation_missing_contributor_snapshots,
+            DecisionAllocationMissingContributorObservation,
+            "allocation_missing_contributor_snapshots",
+        )

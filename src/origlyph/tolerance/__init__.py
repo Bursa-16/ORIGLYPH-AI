@@ -1,6 +1,6 @@
 ﻿"""Origlyph tolerance analysis package.
 
-Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J / 15K.
+Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J / 15K / 15M.
 
 Deterministic 1D tolerance stack analysis. This package provides the typed
 domain model (:mod:`origlyph.tolerance.models`), the deterministic
@@ -14,9 +14,9 @@ deterministic tolerance-budget compliance analysis
 validation (:mod:`origlyph.tolerance.allocation`), deterministic
 worst-case allocation reconciliation (:mod:`origlyph.tolerance.reconciliation`),
 deterministic statistical allocation reconciliation
-(:mod:`origlyph.tolerance.statistical_reconciliation`), and a
-deterministic tolerance decision layer that orchestrates the
-above engines (:mod:`origlyph.tolerance.decision`).
+(:mod:`origlyph.tolerance.statistical_reconciliation`), a
+deterministic tolerance decision layer (:mod:`origlyph.tolerance.decision`),
+and a deterministic decision report envelope (:mod:`origlyph.tolerance.report`).
 
 Statistical tolerance analysis does not replace worst-case analysis.
 Sensitivity analysis explains contribution; it does not change
@@ -31,6 +31,8 @@ or optimize allocations, nor does it convert worst-case spans into sigma.
 The tolerance decision layer orchestrates existing engines into one
 deterministic engineering decision; it does not replace the underlying
 engines, and it is not an AI recommendation engine.
+The decision report is an audit envelope; it does not recompute
+authoritative engineering calculations.
 
 AI does not override deterministic tolerance calculations.
 """
@@ -110,6 +112,21 @@ from .models import (
     WorstCaseWindowResult,
 )
 from .reconciliation import reconcile_allocation
+from .report import (
+    REPORT_SCHEMA_VERSION,
+    DecisionInputs,
+    DecisionProvenance,
+    InvalidDecisionReportError,
+    ReportContributor,
+    ReportEvidenceRef,
+    ReportMetricValue,
+    ReportReasonRef,
+    ReportSection,
+    ToleranceDecisionReport,
+    build_decision_report,
+    build_tolerance_decision_report,
+    decision_report_from_dict,
+)
 from .sensitivity import (
     CovariancePairImpact,
     StatisticalContributionImpact,
@@ -140,11 +157,14 @@ __all__ = [
     "DecisionEvidenceItem",
     "DecisionEvidenceSource",
     "DecisionExplanation",
+    "DecisionInputs",
     "DecisionMetric",
+    "DecisionProvenance",
     "InvalidAllocationError",
     "InvalidBudgetError",
     "InvalidCorrelationError",
     "InvalidDecisionEvidenceError",
+    "InvalidDecisionReportError",
     "InvalidStackError",
     "InvalidStatisticalAllocationError",
     "InvalidStatisticalError",
@@ -152,14 +172,20 @@ __all__ = [
     "InvalidToleranceError",
     "InvalidVarianceError",
     "OriglyphToleranceError",
-        "ReconciliationStatus",
+    "REPORT_SCHEMA_VERSION",
+    "ReconciliationStatus",
     "ReasonEvidenceLink",
+    "ReportContributor",
+    "ReportEvidenceRef",
+    "ReportMetricValue",
+    "ReportReasonRef",
+    "ReportSection",
     "StackDirection",
     "StatisticalAllocation",
     "StatisticalAllocationCovarianceImpact",
     "StatisticalAllocationPlan",
     "StatisticalAllocationReconciliationResult",
-        "StatisticalAllocationReconciliationStatus",
+    "StatisticalAllocationReconciliationStatus",
     "StatisticalAllocationStatus",
     "StatisticalBudgetResult",
     "StatisticalContribution",
@@ -177,6 +203,7 @@ __all__ = [
     "ToleranceDecisionEvidence",
     "ToleranceDecisionReason",
     "ToleranceDecisionReasonCode",
+    "ToleranceDecisionReport",
     "ToleranceDecisionResult",
     "ToleranceDecisionSensitivity",
     "ToleranceDecisionSeverity",
@@ -188,7 +215,13 @@ __all__ = [
     "WorstCaseResult",
     "WorstCaseSensitivityResult",
     "WorstCaseWindowResult",
-        "reconcile_allocation",
+    "build_decision_evidence",
+    "build_decision_report",
+    "build_tolerance_decision_report",
+    "decision_report_from_dict",
+    "evaluate_tolerance_decision",
+    "explain_tolerance_decision",
+    "reconcile_allocation",
     "reconcile_statistical_allocation",
     "statistical",
     "statistical_budget",
@@ -198,7 +231,4 @@ __all__ = [
     "worst_case_budget",
     "worst_case_sensitivity",
     "worst_case_window_compliance",
-    "build_decision_evidence",
-    "explain_tolerance_decision",
-    "evaluate_tolerance_decision",
 ]

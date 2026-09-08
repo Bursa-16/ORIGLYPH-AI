@@ -1,6 +1,7 @@
 ﻿"""Origlyph tolerance analysis package.
 
-Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J / 15K / 15M / 15N.
+Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J / 15K / 15M / 15N /
+15O.
 
 Deterministic 1D tolerance stack analysis. This package provides the typed
 domain model (:mod:`origlyph.tolerance.models`), the deterministic
@@ -37,11 +38,23 @@ The decision report is an audit envelope; it does not recompute
 authoritative engineering calculations.
 Audit-integrity validation checks that envelope for structural consistency;
 it does not recompute or override engineering results.
+The audit package adds deterministic fingerprints and structural replay
+metadata without rerunning authoritative calculations.
 
 AI does not override deterministic tolerance calculations.
 """
 
 from .allocation import validate_allocation
+from .audit import (
+    AUDIT_PACKAGE_SCHEMA_VERSION,
+    DecisionReplayManifest,
+    InvalidDecisionAuditPackageError,
+    ReplayabilityStatus,
+    ToleranceDecisionAuditPackage,
+    audit_package_from_dict,
+    build_decision_audit_package,
+    verify_decision_audit_package,
+)
 from .budget import (
     statistical_budget,
     worst_case_budget,
@@ -154,6 +167,7 @@ from .statistical_reconciliation import reconcile_statistical_allocation
 from .worst_case import worst_case
 
 __all__ = [
+    "AUDIT_PACKAGE_SCHEMA_VERSION",
     "AllocationComplianceStatus",
     "AllocationContributorResult",
     "AllocationPlan",
@@ -178,11 +192,13 @@ __all__ = [
     "DecisionInputs",
     "DecisionMetric",
     "DecisionProvenance",
+    "DecisionReplayManifest",
     "InvalidAllocationError",
     "InvalidAuditIntegrityError",
     "InvalidBudgetError",
     "InvalidCorrelationError",
     "InvalidDecisionEvidenceError",
+    "InvalidDecisionAuditPackageError",
     "InvalidDecisionReportError",
     "InvalidStackError",
     "InvalidStatisticalAllocationError",
@@ -193,6 +209,7 @@ __all__ = [
     "OriglyphToleranceError",
     "REPORT_SCHEMA_VERSION",
     "ReconciliationStatus",
+    "ReplayabilityStatus",
     "ReasonEvidenceLink",
     "ReportContributor",
     "ReportEvidenceRef",
@@ -223,6 +240,7 @@ __all__ = [
     "ToleranceDecisionReason",
     "ToleranceDecisionReasonCode",
     "ToleranceDecisionReport",
+    "ToleranceDecisionAuditPackage",
     "ToleranceDecisionResult",
     "ToleranceDecisionSensitivity",
     "ToleranceDecisionSeverity",
@@ -235,6 +253,7 @@ __all__ = [
     "WorstCaseSensitivityResult",
     "WorstCaseWindowResult",
     "build_decision_evidence",
+    "build_decision_audit_package",
     "build_decision_report",
     "build_tolerance_decision_report",
     "decision_report_from_dict",
@@ -247,8 +266,10 @@ __all__ = [
     "statistical_sensitivity",
     "validate_allocation",
     "validate_decision_report_integrity",
+    "verify_decision_audit_package",
     "worst_case",
     "worst_case_budget",
     "worst_case_sensitivity",
     "worst_case_window_compliance",
+    "audit_package_from_dict",
 ]

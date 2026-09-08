@@ -189,7 +189,8 @@ class ReportMetricValue:
             )
         if not isinstance(self.value, (int, float)):
             raise InvalidDecisionReportError(
-                f"ReportMetricValue.value must be numeric, got {type(self.value).__name__}"
+                "ReportMetricValue.value must be numeric, got "
+                f"{type(self.value).__name__}"
             )
         if not math.isfinite(self.value):
             raise InvalidDecisionReportError(
@@ -552,7 +553,8 @@ class ToleranceDecisionReport:
     section_order: tuple[ReportSection, ...] = field(default_factory=tuple)
     provenance: DecisionProvenance | None = None
 
-    def __post_init__(self) -> None:
+    # Deterministic report-contract validation is intentionally centralized.
+    def __post_init__(self) -> None:  # noqa: C901
         if not isinstance(self.schema_version, str):
             raise InvalidDecisionReportError(
                 f"schema_version must be str, got {type(self.schema_version).__name__}"
@@ -598,7 +600,8 @@ class ToleranceDecisionReport:
                 "section_order must match _REPORT_SECTION_ORDER"
             )
 
-    def section(self, section: ReportSection) -> dict[str, object]:
+    # Deterministic section serialization is intentionally centralized.
+    def section(self, section: ReportSection) -> dict[str, object]:  # noqa: C901
         """Return the deterministic per-section payload.
 
         The returned dict has stable key order: ``metrics`` (sorted
@@ -725,7 +728,8 @@ class ToleranceDecisionReport:
 # ---------------------------------------------------------------------------
 
 
-def _validate_consistency(
+# Deterministic report-assembly consistency checks are intentionally centralized.
+def _validate_consistency(  # noqa: C901
     decision: ToleranceDecisionResult,
     bundle: DecisionEvidenceBundle,
     explanation: DecisionExplanation,
@@ -779,7 +783,8 @@ def _validate_consistency(
             if reason.code not in evidentiary_codes:
                 raise InvalidDecisionReportError(
                     f"reason {reason.code.value} has evidence but no matching "
-                    f"evidence code in bundle; refusing to assemble an inconsistent report"
+                    "evidence code in bundle; refusing to assemble an "
+                    "inconsistent report"
                 )
 
 

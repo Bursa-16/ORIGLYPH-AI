@@ -1,6 +1,6 @@
 ﻿"""Origlyph tolerance analysis package.
 
-Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J / 15K / 15M.
+Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J / 15K / 15M / 15N.
 
 Deterministic 1D tolerance stack analysis. This package provides the typed
 domain model (:mod:`origlyph.tolerance.models`), the deterministic
@@ -16,7 +16,9 @@ worst-case allocation reconciliation (:mod:`origlyph.tolerance.reconciliation`),
 deterministic statistical allocation reconciliation
 (:mod:`origlyph.tolerance.statistical_reconciliation`), a
 deterministic tolerance decision layer (:mod:`origlyph.tolerance.decision`),
-and a deterministic decision report envelope (:mod:`origlyph.tolerance.report`).
+  a deterministic decision report envelope (:mod:`origlyph.tolerance.report`),
+  and deterministic audit-integrity validation
+  (:mod:`origlyph.tolerance.integrity`).
 
 Statistical tolerance analysis does not replace worst-case analysis.
 Sensitivity analysis explains contribution; it does not change
@@ -33,6 +35,8 @@ deterministic engineering decision; it does not replace the underlying
 engines, and it is not an AI recommendation engine.
 The decision report is an audit envelope; it does not recompute
 authoritative engineering calculations.
+Audit-integrity validation checks that envelope for structural consistency;
+it does not recompute or override engineering results.
 
 AI does not override deterministic tolerance calculations.
 """
@@ -68,6 +72,15 @@ from .exceptions import (
     InvalidToleranceError,
     InvalidVarianceError,
     OriglyphToleranceError,
+)
+from .integrity import (
+    AuditIntegrityResult,
+    AuditIntegritySeverity,
+    AuditIntegrityStatus,
+    AuditIntegrityViolation,
+    AuditIntegrityViolationCode,
+    InvalidAuditIntegrityError,
+    validate_decision_report_integrity,
 )
 from .models import (
     AllocationComplianceStatus,
@@ -147,6 +160,11 @@ __all__ = [
     "AllocationReconciliationResult",
     "AllocationStatus",
     "AllocationValidationResult",
+    "AuditIntegrityResult",
+    "AuditIntegritySeverity",
+    "AuditIntegrityStatus",
+    "AuditIntegrityViolation",
+    "AuditIntegrityViolationCode",
     "BudgetStatus",
     "ContributorAllocationCompliance",
     "Correlation",
@@ -161,6 +179,7 @@ __all__ = [
     "DecisionMetric",
     "DecisionProvenance",
     "InvalidAllocationError",
+    "InvalidAuditIntegrityError",
     "InvalidBudgetError",
     "InvalidCorrelationError",
     "InvalidDecisionEvidenceError",
@@ -227,6 +246,7 @@ __all__ = [
     "statistical_budget",
     "statistical_sensitivity",
     "validate_allocation",
+    "validate_decision_report_integrity",
     "worst_case",
     "worst_case_budget",
     "worst_case_sensitivity",

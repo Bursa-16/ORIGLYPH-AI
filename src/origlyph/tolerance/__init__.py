@@ -60,6 +60,16 @@ from .budget import (
     worst_case_budget,
     worst_case_window_compliance,
 )
+from .comparison import (
+    AuditChange,
+    AuditChangeCategory,
+    AuditChangeCode,
+    AuditChangeSignificance,
+    AuditComparisonStatus,
+    AuditPackageComparisonResult,
+    InvalidAuditComparisonError,
+    compare_decision_audit_packages,
+)
 from .decision import evaluate_tolerance_decision
 from .evidence import (
     DecisionComparison,
@@ -179,6 +189,12 @@ __all__ = [
     "AuditIntegrityStatus",
     "AuditIntegrityViolation",
     "AuditIntegrityViolationCode",
+    "AuditChange",
+    "AuditChangeCategory",
+    "AuditChangeCode",
+    "AuditChangeSignificance",
+    "AuditComparisonStatus",
+    "AuditPackageComparisonResult",
     "BudgetStatus",
     "ContributorAllocationCompliance",
     "Correlation",
@@ -195,6 +211,7 @@ __all__ = [
     "DecisionReplayManifest",
     "InvalidAllocationError",
     "InvalidAuditIntegrityError",
+    "InvalidAuditComparisonError",
     "InvalidBudgetError",
     "InvalidCorrelationError",
     "InvalidDecisionEvidenceError",
@@ -256,6 +273,7 @@ __all__ = [
     "build_decision_audit_package",
     "build_decision_report",
     "build_tolerance_decision_report",
+    "compare_decision_audit_packages",
     "decision_report_from_dict",
     "evaluate_tolerance_decision",
     "explain_tolerance_decision",

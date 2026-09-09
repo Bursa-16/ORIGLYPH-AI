@@ -1,7 +1,7 @@
 ﻿"""Origlyph tolerance analysis package.
 
 Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J / 15K / 15M / 15N /
-15O.
+15O / 15P / 15Q.
 
 Deterministic 1D tolerance stack analysis. This package provides the typed
 domain model (:mod:`origlyph.tolerance.models`), the deterministic
@@ -40,6 +40,8 @@ Audit-integrity validation checks that envelope for structural consistency;
 it does not recompute or override engineering results.
 The audit package adds deterministic fingerprints and structural replay
 metadata without rerunning authoritative calculations.
+Audit comparison detects deterministic package changes, and change-impact
+assessment classifies the already-detected changes without rerunning comparison.
 
 AI does not override deterministic tolerance calculations.
 """
@@ -59,6 +61,14 @@ from .budget import (
     statistical_budget,
     worst_case_budget,
     worst_case_window_compliance,
+)
+from .change_impact import (
+    AuditChangeImpact,
+    AuditChangeImpactAssessment,
+    AuditChangeImpactReason,
+    AuditChangeImpactResult,
+    InvalidAuditChangeImpactError,
+    assess_audit_change_impact,
 )
 from .comparison import (
     AuditChange,
@@ -192,6 +202,10 @@ __all__ = [
     "AuditChange",
     "AuditChangeCategory",
     "AuditChangeCode",
+    "AuditChangeImpact",
+    "AuditChangeImpactAssessment",
+    "AuditChangeImpactReason",
+    "AuditChangeImpactResult",
     "AuditChangeSignificance",
     "AuditComparisonStatus",
     "AuditPackageComparisonResult",
@@ -211,6 +225,7 @@ __all__ = [
     "DecisionReplayManifest",
     "InvalidAllocationError",
     "InvalidAuditIntegrityError",
+    "InvalidAuditChangeImpactError",
     "InvalidAuditComparisonError",
     "InvalidBudgetError",
     "InvalidCorrelationError",
@@ -273,6 +288,7 @@ __all__ = [
     "build_decision_audit_package",
     "build_decision_report",
     "build_tolerance_decision_report",
+    "assess_audit_change_impact",
     "compare_decision_audit_packages",
     "decision_report_from_dict",
     "evaluate_tolerance_decision",

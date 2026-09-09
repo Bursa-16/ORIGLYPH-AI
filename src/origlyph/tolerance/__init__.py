@@ -1,7 +1,7 @@
 ﻿"""Origlyph tolerance analysis package.
 
 Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J / 15K / 15M / 15N /
-15O / 15P / 15Q.
+15O / 15P / 15Q / 15R.
 
 Deterministic 1D tolerance stack analysis. This package provides the typed
 domain model (:mod:`origlyph.tolerance.models`), the deterministic
@@ -42,6 +42,8 @@ The audit package adds deterministic fingerprints and structural replay
 metadata without rerunning authoritative calculations.
 Audit comparison detects deterministic package changes, and change-impact
 assessment classifies the already-detected changes without rerunning comparison.
+Change disposition maps assessed impact to a governed action without performing
+review, revalidation, replay, or approval.
 
 AI does not override deterministic tolerance calculations.
 """
@@ -61,6 +63,14 @@ from .budget import (
     statistical_budget,
     worst_case_budget,
     worst_case_window_compliance,
+)
+from .change_disposition import (
+    AuditChangeDisposition,
+    AuditChangeDispositionReason,
+    AuditChangeDispositionReasonCode,
+    AuditChangeDispositionResult,
+    InvalidAuditChangeDispositionError,
+    determine_audit_change_disposition,
 )
 from .change_impact import (
     AuditChangeImpact,
@@ -202,6 +212,10 @@ __all__ = [
     "AuditChange",
     "AuditChangeCategory",
     "AuditChangeCode",
+    "AuditChangeDisposition",
+    "AuditChangeDispositionReason",
+    "AuditChangeDispositionReasonCode",
+    "AuditChangeDispositionResult",
     "AuditChangeImpact",
     "AuditChangeImpactAssessment",
     "AuditChangeImpactReason",
@@ -225,6 +239,7 @@ __all__ = [
     "DecisionReplayManifest",
     "InvalidAllocationError",
     "InvalidAuditIntegrityError",
+    "InvalidAuditChangeDispositionError",
     "InvalidAuditChangeImpactError",
     "InvalidAuditComparisonError",
     "InvalidBudgetError",
@@ -291,6 +306,7 @@ __all__ = [
     "assess_audit_change_impact",
     "compare_decision_audit_packages",
     "decision_report_from_dict",
+    "determine_audit_change_disposition",
     "evaluate_tolerance_decision",
     "explain_tolerance_decision",
     "reconcile_allocation",

@@ -1,7 +1,7 @@
 ﻿"""Origlyph tolerance analysis package.
 
 Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J / 15K / 15M / 15N /
-15O / 15P / 15Q / 15R / 15S / 15T.
+15O / 15P / 15Q / 15R / 15S / 15T / 15U.
 
 Deterministic 1D tolerance stack analysis. This package provides the typed
 domain model (:mod:`origlyph.tolerance.models`), the deterministic
@@ -48,6 +48,8 @@ Approval readiness gates that disposition without recording or performing
 approval.
 The governed-acceptance handoff packages the authoritative audit chain without
 performing acceptance or approval.
+Acceptance-record intake validates and preserves an externally supplied
+governed decision without creating approval or verifying external authority.
 
 AI does not override deterministic tolerance calculations.
 """
@@ -58,6 +60,15 @@ from .acceptance_handoff import (
     AuditAcceptanceHandoffStatus,
     InvalidAuditAcceptanceHandoffError,
     build_audit_acceptance_handoff,
+)
+from .acceptance_record import (
+    ACCEPTANCE_RECORD_SCHEMA_VERSION,
+    VALIDATED_ACCEPTANCE_RECORD_SCHEMA_VERSION,
+    AuditAcceptanceDecision,
+    AuditAcceptanceRecord,
+    InvalidAuditAcceptanceRecordError,
+    ValidatedAuditAcceptanceRecord,
+    validate_audit_acceptance_record,
 )
 from .allocation import validate_allocation
 from .approval_readiness import (
@@ -218,6 +229,8 @@ from .worst_case import worst_case
 __all__ = [
     "AUDIT_PACKAGE_SCHEMA_VERSION",
     "ACCEPTANCE_HANDOFF_SCHEMA_VERSION",
+    "ACCEPTANCE_RECORD_SCHEMA_VERSION",
+    "VALIDATED_ACCEPTANCE_RECORD_SCHEMA_VERSION",
     "AllocationComplianceStatus",
     "AllocationContributorResult",
     "AllocationPlan",
@@ -226,6 +239,8 @@ __all__ = [
     "AllocationValidationResult",
     "AuditAcceptanceHandoffPackage",
     "AuditAcceptanceHandoffStatus",
+    "AuditAcceptanceDecision",
+    "AuditAcceptanceRecord",
     "AuditApprovalReadinessReason",
     "AuditApprovalReadinessReasonCode",
     "AuditApprovalReadinessResult",
@@ -265,6 +280,7 @@ __all__ = [
     "DecisionReplayManifest",
     "InvalidAllocationError",
     "InvalidAuditAcceptanceHandoffError",
+    "InvalidAuditAcceptanceRecordError",
     "InvalidAuditApprovalReadinessError",
     "InvalidAuditIntegrityError",
     "InvalidAuditChangeDispositionError",
@@ -321,6 +337,7 @@ __all__ = [
     "ToleranceDecisionSeverity",
     "ToleranceDecisionStatus",
     "ToleranceStack",
+    "ValidatedAuditAcceptanceRecord",
     "WorstCaseBudgetResult",
     "WorstCaseContributionBudget",
     "WorstCaseContributionImpact",
@@ -345,6 +362,7 @@ __all__ = [
     "statistical_budget",
     "statistical_sensitivity",
     "validate_allocation",
+    "validate_audit_acceptance_record",
     "validate_decision_report_integrity",
     "verify_decision_audit_package",
     "worst_case",

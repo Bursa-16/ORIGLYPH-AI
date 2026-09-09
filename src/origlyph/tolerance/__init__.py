@@ -1,7 +1,7 @@
 ﻿"""Origlyph tolerance analysis package.
 
 Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J / 15K / 15M / 15N /
-15O / 15P / 15Q / 15R / 15S.
+15O / 15P / 15Q / 15R / 15S / 15T.
 
 Deterministic 1D tolerance stack analysis. This package provides the typed
 domain model (:mod:`origlyph.tolerance.models`), the deterministic
@@ -46,10 +46,19 @@ Change disposition maps assessed impact to a governed action without performing
 review, revalidation, replay, or approval.
 Approval readiness gates that disposition without recording or performing
 approval.
+The governed-acceptance handoff packages the authoritative audit chain without
+performing acceptance or approval.
 
 AI does not override deterministic tolerance calculations.
 """
 
+from .acceptance_handoff import (
+    ACCEPTANCE_HANDOFF_SCHEMA_VERSION,
+    AuditAcceptanceHandoffPackage,
+    AuditAcceptanceHandoffStatus,
+    InvalidAuditAcceptanceHandoffError,
+    build_audit_acceptance_handoff,
+)
 from .allocation import validate_allocation
 from .approval_readiness import (
     AuditApprovalReadinessReason,
@@ -208,12 +217,15 @@ from .worst_case import worst_case
 
 __all__ = [
     "AUDIT_PACKAGE_SCHEMA_VERSION",
+    "ACCEPTANCE_HANDOFF_SCHEMA_VERSION",
     "AllocationComplianceStatus",
     "AllocationContributorResult",
     "AllocationPlan",
     "AllocationReconciliationResult",
     "AllocationStatus",
     "AllocationValidationResult",
+    "AuditAcceptanceHandoffPackage",
+    "AuditAcceptanceHandoffStatus",
     "AuditApprovalReadinessReason",
     "AuditApprovalReadinessReasonCode",
     "AuditApprovalReadinessResult",
@@ -252,6 +264,7 @@ __all__ = [
     "DecisionProvenance",
     "DecisionReplayManifest",
     "InvalidAllocationError",
+    "InvalidAuditAcceptanceHandoffError",
     "InvalidAuditApprovalReadinessError",
     "InvalidAuditIntegrityError",
     "InvalidAuditChangeDispositionError",
@@ -316,6 +329,7 @@ __all__ = [
     "WorstCaseWindowResult",
     "build_decision_evidence",
     "build_decision_audit_package",
+    "build_audit_acceptance_handoff",
     "build_decision_report",
     "build_tolerance_decision_report",
     "assess_audit_change_impact",

@@ -1,7 +1,7 @@
 ﻿"""Origlyph tolerance analysis package.
 
 Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J / 15K / 15M / 15N /
-15O / 15P / 15Q / 15R.
+15O / 15P / 15Q / 15R / 15S.
 
 Deterministic 1D tolerance stack analysis. This package provides the typed
 domain model (:mod:`origlyph.tolerance.models`), the deterministic
@@ -44,11 +44,21 @@ Audit comparison detects deterministic package changes, and change-impact
 assessment classifies the already-detected changes without rerunning comparison.
 Change disposition maps assessed impact to a governed action without performing
 review, revalidation, replay, or approval.
+Approval readiness gates that disposition without recording or performing
+approval.
 
 AI does not override deterministic tolerance calculations.
 """
 
 from .allocation import validate_allocation
+from .approval_readiness import (
+    AuditApprovalReadinessReason,
+    AuditApprovalReadinessReasonCode,
+    AuditApprovalReadinessResult,
+    AuditApprovalReadinessStatus,
+    InvalidAuditApprovalReadinessError,
+    evaluate_audit_approval_readiness,
+)
 from .audit import (
     AUDIT_PACKAGE_SCHEMA_VERSION,
     DecisionReplayManifest,
@@ -204,6 +214,10 @@ __all__ = [
     "AllocationReconciliationResult",
     "AllocationStatus",
     "AllocationValidationResult",
+    "AuditApprovalReadinessReason",
+    "AuditApprovalReadinessReasonCode",
+    "AuditApprovalReadinessResult",
+    "AuditApprovalReadinessStatus",
     "AuditIntegrityResult",
     "AuditIntegritySeverity",
     "AuditIntegrityStatus",
@@ -238,6 +252,7 @@ __all__ = [
     "DecisionProvenance",
     "DecisionReplayManifest",
     "InvalidAllocationError",
+    "InvalidAuditApprovalReadinessError",
     "InvalidAuditIntegrityError",
     "InvalidAuditChangeDispositionError",
     "InvalidAuditChangeImpactError",
@@ -308,6 +323,7 @@ __all__ = [
     "decision_report_from_dict",
     "determine_audit_change_disposition",
     "evaluate_tolerance_decision",
+    "evaluate_audit_approval_readiness",
     "explain_tolerance_decision",
     "reconcile_allocation",
     "reconcile_statistical_allocation",

@@ -1,7 +1,7 @@
 ﻿"""Origlyph tolerance analysis package.
 
 Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J / 15K / 15M / 15N /
-15O / 15P / 15Q / 15R / 15S / 15T / 15U / 15V.
+15O / 15P / 15Q / 15R / 15S / 15T / 15U / 15V / 15W.
 
 Deterministic 1D tolerance stack analysis. This package provides the typed
 domain model (:mod:`origlyph.tolerance.models`), the deterministic
@@ -52,10 +52,20 @@ Acceptance-record intake validates and preserves an externally supplied
 governed decision without creating approval or verifying external authority.
 Acceptance verification packages deterministic structural binding evidence
 without revalidating intake or asserting actor authority.
+Acceptance closure packages deterministic references to the accepted binding
+without approving, rejecting, or asserting legal authority.
 
 AI does not override deterministic tolerance calculations.
 """
 
+from .acceptance_closure import (
+    ACCEPTANCE_CLOSURE_SCHEMA_VERSION,
+    AuditAcceptanceClosureManifest,
+    AuditAcceptanceClosureReference,
+    AuditAcceptanceClosureStatus,
+    InvalidAuditAcceptanceClosureError,
+    build_acceptance_closure_manifest,
+)
 from .acceptance_handoff import (
     ACCEPTANCE_HANDOFF_SCHEMA_VERSION,
     AuditAcceptanceHandoffPackage,
@@ -241,6 +251,7 @@ __all__ = [
     "ACCEPTANCE_HANDOFF_SCHEMA_VERSION",
     "ACCEPTANCE_RECORD_SCHEMA_VERSION",
     "ACCEPTANCE_VERIFICATION_SCHEMA_VERSION",
+    "ACCEPTANCE_CLOSURE_SCHEMA_VERSION",
     "VALIDATED_ACCEPTANCE_RECORD_SCHEMA_VERSION",
     "AllocationComplianceStatus",
     "AllocationContributorResult",
@@ -252,6 +263,9 @@ __all__ = [
     "AuditAcceptanceHandoffStatus",
     "AuditAcceptanceDecision",
     "AuditAcceptanceRecord",
+    "AuditAcceptanceClosureManifest",
+    "AuditAcceptanceClosureReference",
+    "AuditAcceptanceClosureStatus",
     "AuditAcceptanceVerificationEnvelope",
     "AuditAcceptanceVerificationFact",
     "AuditAcceptanceVerificationStatus",
@@ -296,6 +310,7 @@ __all__ = [
     "InvalidAuditAcceptanceHandoffError",
     "InvalidAuditAcceptanceRecordError",
     "InvalidAuditAcceptanceVerificationError",
+    "InvalidAuditAcceptanceClosureError",
     "InvalidAuditApprovalReadinessError",
     "InvalidAuditIntegrityError",
     "InvalidAuditChangeDispositionError",
@@ -362,6 +377,7 @@ __all__ = [
     "build_decision_evidence",
     "build_decision_audit_package",
     "build_audit_acceptance_handoff",
+    "build_acceptance_closure_manifest",
     "build_acceptance_record_verification_envelope",
     "build_decision_report",
     "build_tolerance_decision_report",

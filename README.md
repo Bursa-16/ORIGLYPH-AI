@@ -4,8 +4,8 @@
 
 * **Name:** Origlyph
 * **Current status:** Fifth public alpha — deterministic CAD, datum, tolerance-analysis, audit, and governed-acceptance engineering foundation with interactive desktop GUI
-* **Package version:** `0.4.0a4`
-* **Current release/tag:** `v0.4.0-alpha.4`
+* **Package version:** `0.4.0a5`
+* **Current release/tag:** `v0.4.0-alpha.5`
 
 ## Purpose
 
@@ -27,7 +27,7 @@ everything else is roadmap, not implementation.
 
 ## Current Development Status
 
-v0.4.0-alpha.4 consolidates the deterministic engineering architecture developed
+v0.4.0-alpha.5 consolidates the deterministic engineering architecture developed
 through the Stage 15 tolerance and governed-acceptance programme.
 
 The current release includes:
@@ -613,7 +613,7 @@ py -m pytest -q
 py -m ruff check src tests
 py -m pyright
 
-Verified architecture-freeze baseline for v0.4.0-alpha.4:
+Verified architecture-freeze baseline for v0.4.0-alpha.5:
 
 Tolerance tests: 741 passed
 Full test suite: 1275 passed
@@ -631,11 +631,15 @@ Release
 
 Current prerelease:
 
-v0.4.0-alpha.4
+v0.4.0-alpha.5
 
 Package version:
 
-0.4.0a4
+0.4.0a5
+
+Release notes:
+
+RELEASE_NOTES_v0.4.0-alpha.5.md
 
 Release status:
 
@@ -647,7 +651,7 @@ Stage 15W.
 
 Previous release:
 
-v0.4.0-alpha.3
+v0.4.0-alpha.4
 Future / Non-Blocking Work
 
 The following items remain future work and are not release blockers for the
@@ -671,12 +675,3 @@ License
 Released under the MIT License.
 
 See LICENSE.
-
-
-Ben özellikle şu üç önemli düzeltmeyi yaptım:
-
-- `alpha.3 / 0.4.0a3` → **`alpha.4 / 0.4.0a4`**
-- Eski README’deki **“engineering tolerance runtime / tolerance stack-up solver yok”** ifadelerini kaldırdım; artık 1D deterministic tolerance mimarisi gerçekten mevcut.
-- Stage 15K–15W arasındaki **decision → evidence → audit → comparison → impact → disposition → readiness → handoff → acceptance → verification → closure** zincirini README’ye ekledim.
-
-Bir nokta daha: Release commit/tag henüz gerçekten tamamlanmadıysa, README’deki `v0.4.0-alpha.4` ve `0.4.0a4` ifadeleri

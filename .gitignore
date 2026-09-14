@@ -42,3 +42,6 @@ data/local/
 datasets/
 *.cache
 *.tmp
+
+# Recovery quarantine (preserved out-of-scope fragments; never committed)
+.attic/

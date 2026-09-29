@@ -1,4 +1,4 @@
-﻿"""Origlyph tolerance analysis package.
+"""Origlyph tolerance analysis package.
 
 Stage 15C-R / 15D / 15E / 15F / 15G / 15H / 15I / 15J / 15K / 15M / 15N /
 15O / 15P / 15Q / 15R / 15S / 15T / 15U / 15V / 15W.
@@ -244,6 +244,21 @@ from .sensitivity import (
 )
 from .statistical import statistical
 from .statistical_reconciliation import reconcile_statistical_allocation
+from .workspace_controller import (
+    TOLERANCE_WORKSPACE_SCHEMA_VERSION,
+    AnalysisMode,
+    InvalidToleranceWorkspaceError,
+    ToleranceWorkspaceController,
+    WorkspaceAnalysisResult,
+    WorkspaceContributor,
+    WorkspaceState,
+    workspace_configuration_fingerprint,
+    workspace_result_identities,
+    workspace_state_from_snapshot,
+    workspace_state_to_snapshot,
+    workspace_summary_values,
+)
+from .workspace_model import ToleranceWorkspaceView, launch_tolerance_workspace
 from .worst_case import worst_case
 
 __all__ = [
@@ -352,6 +367,14 @@ __all__ = [
     "StatisticalResult",
     "StatisticalSensitivityResult",
     "StatisticalStack",
+    "AnalysisMode",
+    "InvalidToleranceWorkspaceError",
+    "TOLERANCE_WORKSPACE_SCHEMA_VERSION",
+    "ToleranceWorkspaceController",
+    "ToleranceWorkspaceView",
+    "WorkspaceAnalysisResult",
+    "WorkspaceContributor",
+    "WorkspaceState",
     "ToleranceAllocation",
     "ToleranceContribution",
     "ToleranceDecisionCovarianceEffect",
@@ -402,4 +425,10 @@ __all__ = [
     "worst_case_sensitivity",
     "worst_case_window_compliance",
     "audit_package_from_dict",
+    "launch_tolerance_workspace",
+    "workspace_configuration_fingerprint",
+    "workspace_result_identities",
+    "workspace_state_from_snapshot",
+    "workspace_state_to_snapshot",
+    "workspace_summary_values",
 ]

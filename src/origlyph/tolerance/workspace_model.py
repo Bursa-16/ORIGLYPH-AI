@@ -361,5 +361,3 @@ def launch_tolerance_workspace(
     controller: ToleranceWorkspaceController | None = None,
 ) -> None:
     ToleranceWorkspaceView(controller).run()
-
-

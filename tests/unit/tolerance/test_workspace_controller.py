@@ -243,4 +243,3 @@ def test_set_analysis_mode_invalidates_result_when_changed() -> None:
     assert controller.analysis_mode is AnalysisMode.RSS_STATISTICAL
     assert controller.last_result is not result
     assert controller.last_result is None
-

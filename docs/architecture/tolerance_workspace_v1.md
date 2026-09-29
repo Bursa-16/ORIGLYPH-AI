@@ -183,4 +183,3 @@ the Stage 16C project document.
 
 The workspace view and controller are deterministic. No AI participates in validation,
 analysis, or persistence, and no AI output can override engine output.
-

@@ -3,9 +3,9 @@
 ## Project Identity
 
 * **Name:** Origlyph
-* **Current status:** Fifth public alpha — deterministic CAD, datum, tolerance-analysis, audit, and governed-acceptance engineering foundation with interactive desktop GUI
-* **Package version:** `0.4.0a5`
-* **Current release/tag:** `v0.4.0-alpha.5`
+* **Current status:** Sixth public alpha — deterministic CAD, datum, tolerance-analysis, audit, and governed-acceptance engineering foundation with interactive desktop GUI, persisted project model, and tolerance workspace
+* **Package version:** `0.4.0a6`
+* **Current release/tag:** `v0.4.0-alpha.6`
 
 ## Purpose
 
@@ -27,8 +27,9 @@ everything else is roadmap, not implementation.
 
 ## Current Development Status
 
-v0.4.0-alpha.5 consolidates the deterministic engineering architecture developed
-through the Stage 15 tolerance and governed-acceptance programme.
+v0.4.0-alpha.6 adds the deterministic persisted project model and the interactive
+tolerance workspace foundation on top of the Stage 15 tolerance and
+governed-acceptance architecture.
 
 The current release includes:
 
@@ -63,6 +64,8 @@ The current release includes:
 * external acceptance-record validation
 * acceptance-record verification envelope
 * final governed acceptance closure manifest
+* deterministic persisted project model v1 (save/load with tamper-evident project identity)
+* interactive 1D tolerance workspace (worst-case and RSS statistical analysis) with deterministic result persistence
 
 The tolerance and governed-acceptance pipeline has been architecture-audited for
 determinism, canonical serialization, fail-closed behaviour, identity integrity,
@@ -613,45 +616,46 @@ py -m pytest -q
 py -m ruff check src tests
 py -m pyright
 
-Verified architecture-freeze baseline for v0.4.0-alpha.5:
+Verified release baseline for v0.4.0-alpha.6:
 
-Tolerance tests: 741 passed
-Full test suite: 1275 passed
+Project tests: 26 passed
+Workspace controller tests: 11 passed
+Workspace persistence tests: 7 passed
+Workspace view tests: 7 passed
+Tolerance tests: 766 passed
+Full test suite: 1326 passed
 Ruff: PASS
 Pyright: PASS — 0 errors, 0 warnings
 
-Stage 15X architecture and release-readiness assessment concluded:
+Stage 16E project identity integrity and release-readiness assessment
+concluded:
 
-RELEASE_READINESS_CONFIRMED
-
-No additional tolerance-domain primitive was identified as required before the
-current alpha architecture freeze.
+ALPHA6_RELEASE_READY
 
 Release
 
 Current prerelease:
 
-v0.4.0-alpha.5
+v0.4.0-alpha.6
 
 Package version:
 
-0.4.0a5
+0.4.0a6
 
 Release notes:
 
-RELEASE_NOTES_v0.4.0-alpha.5.md
+RELEASE_NOTES_v0.4.0-alpha.6.md
 
 Release status:
 
 PRE-RELEASE / ALPHA
 
-The release consolidates the deterministic tolerance, audit, replay,
-change-governance, and governed-acceptance architecture completed through
-Stage 15W.
+The release adds the persisted project model v1, the tolerance workspace
+foundation v1, and their deterministic identity and persistence semantics.
 
 Previous release:
 
-v0.4.0-alpha.4
+v0.4.0-alpha.5
 Future / Non-Blocking Work
 
 The following items remain future work and are not release blockers for the

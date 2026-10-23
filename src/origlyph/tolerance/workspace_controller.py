@@ -1,4 +1,4 @@
-"""Headless tolerance workspace controller (Stage 16D)."""
+"""Headless tolerance workspace controller (Stage 16D / 17A)."""
 
 from __future__ import annotations
 
@@ -25,10 +25,12 @@ from .worst_case import worst_case
 
 __all__ = [
     "TOLERANCE_WORKSPACE_SCHEMA_VERSION",
+    "TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2",
     "AnalysisMode",
     "InvalidToleranceWorkspaceError",
     "WorkspaceAnalysisResult",
     "WorkspaceContributor",
+    "WorkspaceSpecification",
     "WorkspaceState",
     "ToleranceWorkspaceController",
     "workspace_configuration_fingerprint",
@@ -39,6 +41,7 @@ __all__ = [
 ]
 
 TOLERANCE_WORKSPACE_SCHEMA_VERSION = "origlyph.tolerance.workspace.v1"
+TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2 = "origlyph.tolerance.workspace.v2"
 _SUPPORTED_TOLERANCE_MODEL = "symmetric"
 _DEFAULT_SIGMA_MULTIPLIER = 1.0
 
@@ -52,6 +55,49 @@ class AnalysisMode(Enum):
 
     WORST_CASE = "worst_case"
     RSS_STATISTICAL = "rss_statistical"
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceSpecification:
+    """Immutable engineering specification limits for the workspace (Stage 17A).
+
+    Both fields are optional.  When present each must be strictly positive and
+    finite, matching the semantics of ``allowed_worst_case_span`` and
+    ``allowed_combined_sigma`` in
+    :func:`~origlyph.tolerance.evaluate_tolerance_decision`.
+
+    This model carries engineering limits only.  It contains no tolerance
+    calculation logic and no presentation state.
+    """
+
+    allowed_worst_case_span: float | None = None
+    allowed_combined_sigma: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.allowed_worst_case_span is not None:
+            span = _require_finite(
+                self.allowed_worst_case_span, field="allowed_worst_case_span"
+            )
+            if span <= 0.0:
+                raise InvalidToleranceWorkspaceError(
+                    "allowed_worst_case_span must be strictly positive"
+                )
+            object.__setattr__(self, "allowed_worst_case_span", span)
+        if self.allowed_combined_sigma is not None:
+            sigma = _require_finite(
+                self.allowed_combined_sigma, field="allowed_combined_sigma"
+            )
+            if sigma <= 0.0:
+                raise InvalidToleranceWorkspaceError(
+                    "allowed_combined_sigma must be strictly positive"
+                )
+            object.__setattr__(self, "allowed_combined_sigma", sigma)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "allowed_worst_case_span": self.allowed_worst_case_span,
+            "allowed_combined_sigma": self.allowed_combined_sigma,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,17 +140,35 @@ class WorkspaceContributor:
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceState:
-    """Immutable authoritative workspace configuration."""
+    """Immutable authoritative workspace configuration.
+
+    ``schema_version`` is either :data:`TOLERANCE_WORKSPACE_SCHEMA_VERSION`
+    (v1, no specification) or :data:`TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2`
+    (v2, optional specification).  V1 states always have ``specification=None``.
+    """
 
     schema_version: str
     chain_name: str
     analysis_mode: AnalysisMode
     contributors: tuple[WorkspaceContributor, ...]
+    specification: WorkspaceSpecification | None = None
 
     def __post_init__(self) -> None:
-        if self.schema_version != TOLERANCE_WORKSPACE_SCHEMA_VERSION:
+        _v1 = TOLERANCE_WORKSPACE_SCHEMA_VERSION
+        _v2 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2
+        if self.schema_version not in (_v1, _v2):
             raise InvalidToleranceWorkspaceError(
                 f"unsupported workspace schema {self.schema_version!r}"
+            )
+        if self.schema_version == _v1 and self.specification is not None:
+            raise InvalidToleranceWorkspaceError(
+                "workspace v1 does not support specification; use v2"
+            )
+        if self.specification is not None and not isinstance(
+            self.specification, WorkspaceSpecification
+        ):
+            raise InvalidToleranceWorkspaceError(
+                "specification must be WorkspaceSpecification or None"
             )
         _require_text(self.chain_name, field="chain_name")
         object.__setattr__(
@@ -125,12 +189,18 @@ class WorkspaceState:
             seen.add(item.identifier)
 
     def as_dict(self) -> dict[str, object]:
-        return {
+        base: dict[str, object] = {
             "schema_version": self.schema_version,
             "chain_name": self.chain_name,
             "analysis_mode": self.analysis_mode.value,
             "contributors": [item.as_dict() for item in self.contributors],
         }
+        if self.schema_version == TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2:
+            spec_dict: object = (
+                self.specification.as_dict() if self.specification is not None else None
+            )
+            base["specification"] = spec_dict
+        return base
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,12 +229,19 @@ class ToleranceWorkspaceController:
         chain_name: str,
         analysis_mode: AnalysisMode | str,
         contributors: tuple[WorkspaceContributor, ...] = (),
+        specification: WorkspaceSpecification | None = None,
     ) -> None:
+        schema = (
+            TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2
+            if specification is not None
+            else TOLERANCE_WORKSPACE_SCHEMA_VERSION
+        )
         self._state = WorkspaceState(
-            schema_version=TOLERANCE_WORKSPACE_SCHEMA_VERSION,
+            schema_version=schema,
             chain_name=chain_name,
             analysis_mode=_coerce_analysis_mode(analysis_mode),
             contributors=contributors,
+            specification=specification,
         )
         self._last_result: WorkspaceAnalysisResult | None = None
 
@@ -179,6 +256,10 @@ class ToleranceWorkspaceController:
     @property
     def analysis_mode(self) -> AnalysisMode:
         return self._state.analysis_mode
+
+    @property
+    def specification(self) -> WorkspaceSpecification | None:
+        return self._state.specification
 
     @property
     def last_result(self) -> WorkspaceAnalysisResult | None:
@@ -196,11 +277,12 @@ class ToleranceWorkspaceController:
 
     @classmethod
     def from_state(cls, state: WorkspaceState) -> ToleranceWorkspaceController:
-        return cls(
-            chain_name=state.chain_name,
-            analysis_mode=state.analysis_mode,
-            contributors=state.contributors,
-        )
+        # Bypass __init__ to preserve the exact schema_version from the loaded state.
+        # A v2 state with specification=None must not silently downgrade to v1.
+        instance = cls.__new__(cls)
+        instance._state = state
+        instance._last_result = None
+        return instance
 
     @classmethod
     def open_project(cls, path: str | Path) -> ToleranceWorkspaceController:
@@ -242,6 +324,37 @@ class ToleranceWorkspaceController:
         if mode is self._state.analysis_mode:
             return
         self._state = replace(self._state, analysis_mode=mode)
+        self._last_result = None
+
+    def set_specification(
+        self, specification: WorkspaceSpecification | None
+    ) -> None:
+        """Set or clear the engineering specification limits (Stage 17A).
+
+        A change upgrades the workspace schema to v2 and invalidates any cached
+        result.  Setting the same value as the current specification is a no-op.
+        When ``specification`` is ``None`` the workspace retains v2 schema if it
+        was already v2, or stays v1 if it was already v1 — no downgrade occurs.
+        """
+        if specification is not None and not isinstance(
+            specification, WorkspaceSpecification
+        ):
+            raise InvalidToleranceWorkspaceError(
+                "specification must be WorkspaceSpecification or None"
+            )
+        if specification == self._state.specification:
+            return
+        if specification is not None:
+            new_schema = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2
+        elif self._state.schema_version == TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2:
+            new_schema = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2
+        else:
+            # v1 → clearing already-None spec: genuine no-op (guarded above).
+            # This branch is unreachable; guard it for safety.
+            return  # pragma: no cover
+        self._state = replace(
+            self._state, schema_version=new_schema, specification=specification
+        )
         self._last_result = None
 
     def add_contributor(
@@ -390,22 +503,15 @@ def workspace_state_to_snapshot(state: WorkspaceState) -> dict[str, object]:
 
 def workspace_state_from_snapshot(snapshot: object) -> WorkspaceState:
     data = _require_dict(snapshot, field="workspace snapshot")
-    _require_exact_keys(
-        data,
-        {"schema_version", "chain_name", "analysis_mode", "contributors"},
-        field="workspace snapshot",
-    )
-    raw_contributors = data["contributors"]
-    if not isinstance(raw_contributors, list):
-        raise InvalidToleranceWorkspaceError("contributors must be a list")
-    return WorkspaceState(
-        schema_version=data["schema_version"],
-        chain_name=_require_text(data["chain_name"], field="chain_name"),
-        analysis_mode=_coerce_analysis_mode(data["analysis_mode"]),
-        contributors=tuple(
-            _contributor_from_snapshot(item) for item in raw_contributors
-        ),
-    )
+    raw_schema = data.get("schema_version")
+    if raw_schema == TOLERANCE_WORKSPACE_SCHEMA_VERSION:
+        return _workspace_state_v1_from_dict(data)
+    elif raw_schema == TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2:
+        return _workspace_state_v2_from_dict(data)
+    else:
+        raise InvalidToleranceWorkspaceError(
+            f"unsupported workspace schema {raw_schema!r}"
+        )
 
 
 def workspace_configuration_fingerprint(state: WorkspaceState) -> str:
@@ -430,6 +536,79 @@ def workspace_summary_values(
         return {}
     _validate_summary(result.summary_values)
     return dict(result.summary_values)
+
+
+def _workspace_state_v1_from_dict(data: dict[str, Any]) -> WorkspaceState:
+    _require_exact_keys(
+        data,
+        {"schema_version", "chain_name", "analysis_mode", "contributors"},
+        field="workspace snapshot",
+    )
+    raw_contributors = data["contributors"]
+    if not isinstance(raw_contributors, list):
+        raise InvalidToleranceWorkspaceError("contributors must be a list")
+    return WorkspaceState(
+        schema_version=data["schema_version"],
+        chain_name=_require_text(data["chain_name"], field="chain_name"),
+        analysis_mode=_coerce_analysis_mode(data["analysis_mode"]),
+        contributors=tuple(
+            _contributor_from_snapshot(item) for item in raw_contributors
+        ),
+        specification=None,
+    )
+
+
+def _workspace_state_v2_from_dict(data: dict[str, Any]) -> WorkspaceState:
+    _require_exact_keys(
+        data,
+        {
+            "schema_version", "chain_name", "analysis_mode",
+            "contributors", "specification",
+        },
+        field="workspace snapshot v2",
+    )
+    raw_contributors = data["contributors"]
+    if not isinstance(raw_contributors, list):
+        raise InvalidToleranceWorkspaceError("contributors must be a list")
+    raw_spec = data["specification"]
+    if raw_spec is None:
+        specification = None
+    elif isinstance(raw_spec, dict):
+        specification = _workspace_specification_from_dict(raw_spec)
+    else:
+        raise InvalidToleranceWorkspaceError(
+            "workspace specification must be a dict or null"
+        )
+    return WorkspaceState(
+        schema_version=data["schema_version"],
+        chain_name=_require_text(data["chain_name"], field="chain_name"),
+        analysis_mode=_coerce_analysis_mode(data["analysis_mode"]),
+        contributors=tuple(
+            _contributor_from_snapshot(item) for item in raw_contributors
+        ),
+        specification=specification,
+    )
+
+
+def _workspace_specification_from_dict(data: object) -> WorkspaceSpecification:
+    d = _require_dict(data, field="workspace specification")
+    _require_exact_keys(
+        d,
+        {"allowed_worst_case_span", "allowed_combined_sigma"},
+        field="workspace specification",
+    )
+    wc = d["allowed_worst_case_span"]
+    sigma = d["allowed_combined_sigma"]
+    return WorkspaceSpecification(
+        allowed_worst_case_span=(
+            None if wc is None else _require_finite(wc, field="allowed_worst_case_span")
+        ),
+        allowed_combined_sigma=(
+            None
+            if sigma is None
+            else _require_finite(sigma, field="allowed_combined_sigma")
+        ),
+    )
 
 
 def _contributor_from_snapshot(snapshot: object) -> WorkspaceContributor:

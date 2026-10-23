@@ -1,7 +1,8 @@
-"""Thin Tkinter tolerance workspace view (Stage 16D)."""
+"""Thin Tkinter tolerance workspace view (Stage 16D / 17A)."""
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -12,11 +13,35 @@ from .workspace_controller import (
     InvalidToleranceWorkspaceError,
     ToleranceWorkspaceController,
     WorkspaceAnalysisResult,
+    WorkspaceSpecification,
 )
 
 __all__ = ["ToleranceWorkspaceView", "WorkspaceSession", "launch_tolerance_workspace"]
 
 _NO_RESULT_TEXT = "No result"
+
+
+def _spec_field_str(spec: WorkspaceSpecification | None, attr: str) -> str:
+    if spec is None:
+        return ""
+    val: float | None = getattr(spec, attr)
+    return "" if val is None else str(val)
+
+
+def _parse_opt_positive_str(value: str, label: str) -> float | None:
+    """Return None for empty/blank, or a validated strictly-positive finite float."""
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        numeric = float(stripped)
+    except ValueError as exc:
+        raise InvalidToleranceWorkspaceError(f"{label}: must be numeric") from exc
+    if not math.isfinite(numeric):
+        raise InvalidToleranceWorkspaceError(f"{label}: must be finite")
+    if numeric <= 0.0:
+        raise InvalidToleranceWorkspaceError(f"{label}: must be strictly positive")
+    return numeric
 
 
 class WorkspaceSession:
@@ -30,6 +55,12 @@ class WorkspaceSession:
         self.controller = controller
         self.chain_name: str = controller.state.chain_name
         self.analysis_mode: str = controller.analysis_mode.value
+        self.allowed_wc_span: str = _spec_field_str(
+            controller.specification, "allowed_worst_case_span"
+        )
+        self.allowed_sigma: str = _spec_field_str(
+            controller.specification, "allowed_combined_sigma"
+        )
 
     @property
     def result_text(self) -> str:
@@ -50,6 +81,24 @@ class WorkspaceSession:
         """
         self.controller.set_chain_name(self.chain_name)
         self.controller.set_analysis_mode(self.analysis_mode)
+
+    def sync_specification(self) -> None:
+        """Push specification string fields to the controller (Stage 17A).
+
+        Empty strings mean unspecified — not zero.  Invalid values propagate as
+        :class:`~origlyph.tolerance.InvalidToleranceWorkspaceError`.
+        No analysis is triggered.
+        """
+        wc = _parse_opt_positive_str(self.allowed_wc_span, "allowed worst-case span")
+        sigma = _parse_opt_positive_str(self.allowed_sigma, "allowed combined sigma")
+        spec = (
+            WorkspaceSpecification(
+                allowed_worst_case_span=wc, allowed_combined_sigma=sigma
+            )
+            if wc is not None or sigma is not None
+            else None
+        )
+        self.controller.set_specification(spec)
 
     def run_analysis(self) -> WorkspaceAnalysisResult:
         return self.controller.run_analysis()
@@ -95,6 +144,13 @@ class ToleranceWorkspaceView:
         self._nominal = tk.StringVar()
         self._tolerance = tk.StringVar()
         self._direction = tk.StringVar(value=StackDirection.FORWARD.value)
+        spec = self.controller.specification
+        self._allowed_wc_span = tk.StringVar(
+            value=_spec_field_str(spec, "allowed_worst_case_span")
+        )
+        self._allowed_sigma = tk.StringVar(
+            value=_spec_field_str(spec, "allowed_combined_sigma")
+        )
         self._result = tk.StringVar(value=self._session.result_text)
         self._build()
         self._refresh_rows()
@@ -140,8 +196,32 @@ class ToleranceWorkspaceView:
             lambda _event: self._guard(self._sync_header),
         )
 
+        spec_frame = ttk.Labelframe(main, text="Specification limits", padding=8)
+        spec_frame.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        ttk.Label(spec_frame, text="Allowed WC Span").grid(row=0, column=0, sticky="w")
+        wc_entry = ttk.Entry(spec_frame, textvariable=self._allowed_wc_span, width=14)
+        wc_entry.grid(row=0, column=1, sticky="ew", padx=(4, 16))
+        wc_entry.bind(
+            "<FocusOut>", lambda _event: self._guard(self._sync_specification)
+        )
+        wc_entry.bind("<Return>", lambda _event: self._guard(self._sync_specification))
+        ttk.Label(spec_frame, text="Allowed σ").grid(row=0, column=2, sticky="w")
+        sigma_entry = ttk.Entry(
+            spec_frame, textvariable=self._allowed_sigma, width=14
+        )
+        sigma_entry.grid(row=0, column=3, sticky="ew", padx=(4, 0))
+        sigma_entry.bind(
+            "<FocusOut>", lambda _event: self._guard(self._sync_specification)
+        )
+        sigma_entry.bind(
+            "<Return>", lambda _event: self._guard(self._sync_specification)
+        )
+        ttk.Label(spec_frame, text="(leave blank = unspecified)").grid(
+            row=1, column=0, columnspan=4, sticky="w"
+        )
+
         editor = ttk.Labelframe(main, text="Tolerance chain editor", padding=8)
-        editor.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        editor.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         editor.columnconfigure(5, weight=1)
         for column, (label, var) in enumerate(fields):
             ttk.Label(editor, text=label).grid(row=0, column=column, sticky="w")
@@ -190,34 +270,42 @@ class ToleranceWorkspaceView:
         )
 
         control = ttk.Labelframe(main, text="Analysis control", padding=8)
-        control.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        control.grid(row=3, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(control, text="Run", command=self._run_analysis).pack(side="left")
 
         results = ttk.Labelframe(main, text="Results", padding=8)
-        results.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        results.grid(row=4, column=0, sticky="ew", pady=(8, 0))
         results.columnconfigure(0, weight=1)
         ttk.Label(results, textvariable=self._result).grid(
             row=0, column=0, sticky="w"
         )
 
         storage = ttk.Labelframe(main, text="Save / load", padding=8)
-        storage.grid(row=4, column=0, sticky="ew", pady=(8, 0))
+        storage.grid(row=5, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(storage, text="Open", command=self._open).pack(side="left")
         ttk.Button(storage, text="Save", command=self._save).pack(
             side="left", padx=(8, 0)
         )
 
     def _sync_header(self) -> None:
-        """Push header widgets into the controller, keeping the same instance.
-
-        Rebuilding the controller here would drop its cached result, so a Save
-        after a Run could persist no evidence at all.
-        """
+        """Push header widgets into the controller, keeping the same instance."""
         session = self._session
         session.chain_name = self._chain_name.get()
         session.analysis_mode = self._analysis_mode.get()
         session.sync_header()
         self._refresh_result()
+
+    def _sync_specification(self) -> None:
+        """Push specification entry fields to the controller (Stage 17A).
+
+        Empty field means unspecified — not zero.  Invalid values are routed
+        through the guard and surfaced without updating state.  No analysis is
+        triggered here.
+        """
+        session = self._session
+        session.allowed_wc_span = self._allowed_wc_span.get()
+        session.allowed_sigma = self._allowed_sigma.get()
+        session.sync_specification()
 
     def _refresh_result(self) -> None:
         """Keep the Results label in step with the controller cache."""
@@ -307,6 +395,15 @@ class ToleranceWorkspaceView:
         self._session.analysis_mode = self.controller.analysis_mode.value
         self._chain_name.set(self.controller.state.chain_name)
         self._analysis_mode.set(self.controller.analysis_mode.value)
+        spec = self.controller.specification
+        self._allowed_wc_span.set(
+            _spec_field_str(spec, "allowed_worst_case_span")
+        )
+        self._allowed_sigma.set(
+            _spec_field_str(spec, "allowed_combined_sigma")
+        )
+        self._session.allowed_wc_span = self._allowed_wc_span.get()
+        self._session.allowed_sigma = self._allowed_sigma.get()
         self._refresh_rows()
         self._refresh_result()
 

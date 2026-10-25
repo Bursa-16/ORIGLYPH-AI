@@ -1,4 +1,4 @@
-"""Thin Tkinter tolerance workspace view (Stage 16D / 17A)."""
+"""Thin Tkinter tolerance workspace view (Stage 16D / 17A / 17B)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .models import StackDirection
+from .models import (
+    StackDirection,
+    ToleranceDecisionEvidence,
+    ToleranceDecisionResult,
+    ToleranceDecisionSeverity,
+)
 from .workspace_controller import (
     AnalysisMode,
     InvalidToleranceWorkspaceError,
@@ -19,6 +24,29 @@ from .workspace_controller import (
 __all__ = ["ToleranceWorkspaceView", "WorkspaceSession", "launch_tolerance_workspace"]
 
 _NO_RESULT_TEXT = "No result"
+_NO_DECISION_TEXT = "NOT EVALUATED"
+
+
+def _numeric_detail_parts(
+    ev: ToleranceDecisionEvidence, mode: AnalysisMode
+) -> list[str]:
+    """Return Actual / Limit / Margin parts for one analysis mode."""
+    parts: list[str] = []
+    if mode is AnalysisMode.WORST_CASE:
+        if ev.worst_case_actual_span is not None:
+            parts.append(f"Actual: {ev.worst_case_actual_span:.6g}")
+        if ev.worst_case_allowed_span is not None:
+            parts.append(f"Limit: {ev.worst_case_allowed_span:.6g}")
+        if ev.worst_case_margin is not None:
+            parts.append(f"Margin: {ev.worst_case_margin:.6g}")
+    elif mode is AnalysisMode.RSS_STATISTICAL:
+        if ev.statistical_actual_combined_sigma is not None:
+            parts.append(f"Actual σ: {ev.statistical_actual_combined_sigma:.6g}")
+        if ev.statistical_allowed_combined_sigma is not None:
+            parts.append(f"Limit σ: {ev.statistical_allowed_combined_sigma:.6g}")
+        if ev.statistical_margin is not None:
+            parts.append(f"Margin: {ev.statistical_margin:.6g}")
+    return parts
 
 
 def _spec_field_str(spec: WorkspaceSpecification | None, attr: str) -> str:
@@ -100,6 +128,31 @@ class WorkspaceSession:
         )
         self.controller.set_specification(spec)
 
+    @property
+    def decision_text(self) -> str:
+        """Presentation text for the current decision state; never stale."""
+        decision = self.controller.last_decision
+        if decision is None:
+            return _NO_DECISION_TEXT
+        return decision.overall_status.value.upper()
+
+    @property
+    def decision_detail_text(self) -> str:
+        """Compact detail line with Actual / Limit / Margin / Reason."""
+        decision = self.controller.last_decision
+        if decision is None:
+            return ""
+        parts = _numeric_detail_parts(decision.evidence, self.controller.analysis_mode)
+        for reason in decision.reasons:
+            if reason.severity is ToleranceDecisionSeverity.FAILURE:
+                parts.append(f"Reason: {reason.code.value}")
+                break
+        return "  ".join(parts) if parts else ""
+
+    def evaluate_decision(self) -> ToleranceDecisionResult:
+        """Delegate decision evaluation to the controller."""
+        return self.controller.evaluate_decision()
+
     def run_analysis(self) -> WorkspaceAnalysisResult:
         return self.controller.run_analysis()
 
@@ -152,6 +205,8 @@ class ToleranceWorkspaceView:
             value=_spec_field_str(spec, "allowed_combined_sigma")
         )
         self._result = tk.StringVar(value=self._session.result_text)
+        self._decision_status = tk.StringVar(value=_NO_DECISION_TEXT)
+        self._decision_detail = tk.StringVar(value="")
         self._build()
         self._refresh_rows()
 
@@ -280,8 +335,23 @@ class ToleranceWorkspaceView:
             row=0, column=0, sticky="w"
         )
 
+        decision = ttk.Labelframe(main, text="Decision", padding=8)
+        decision.grid(row=5, column=0, sticky="ew", pady=(8, 0))
+        decision.columnconfigure(1, weight=1)
+        ttk.Button(
+            decision, text="Evaluate Decision", command=self._run_decision
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Label(
+            decision,
+            textvariable=self._decision_status,
+            font=("", 10, "bold"),
+        ).grid(row=0, column=1, sticky="w")
+        ttk.Label(decision, textvariable=self._decision_detail).grid(
+            row=1, column=0, columnspan=2, sticky="w", pady=(4, 0)
+        )
+
         storage = ttk.Labelframe(main, text="Save / load", padding=8)
-        storage.grid(row=5, column=0, sticky="ew", pady=(8, 0))
+        storage.grid(row=6, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(storage, text="Open", command=self._open).pack(side="left")
         ttk.Button(storage, text="Save", command=self._save).pack(
             side="left", padx=(8, 0)
@@ -306,10 +376,25 @@ class ToleranceWorkspaceView:
         session.allowed_wc_span = self._allowed_wc_span.get()
         session.allowed_sigma = self._allowed_sigma.get()
         session.sync_specification()
+        self._refresh_decision()
 
     def _refresh_result(self) -> None:
         """Keep the Results label in step with the controller cache."""
         self._result.set(self._session.result_text)
+        self._refresh_decision()
+
+    def _refresh_decision(self) -> None:
+        """Keep the Decision labels in step with the controller cache."""
+        self._decision_status.set(self._session.decision_text)
+        self._decision_detail.set(self._session.decision_detail_text)
+
+    def _run_decision(self) -> None:
+        self._guard(lambda: self._run_decision_impl())
+
+    def _run_decision_impl(self) -> None:
+        self._sync_header()
+        self._session.evaluate_decision()
+        self._refresh_decision()
 
     def _clear_form(self) -> None:
         for var in (self._identifier, self._name, self._nominal, self._tolerance):

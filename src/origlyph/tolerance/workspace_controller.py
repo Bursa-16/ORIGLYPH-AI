@@ -1,4 +1,4 @@
-"""Headless tolerance workspace controller (Stage 16D / 17A)."""
+"""Headless tolerance workspace controller (Stage 16D / 17A / 17B)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from .decision import evaluate_tolerance_decision
 from .exceptions import OriglyphToleranceError
 from .models import (
     StackDirection,
@@ -17,6 +18,7 @@ from .models import (
     StatisticalResult,
     StatisticalStack,
     ToleranceContribution,
+    ToleranceDecisionResult,
     ToleranceStack,
     WorstCaseResult,
 )
@@ -244,6 +246,7 @@ class ToleranceWorkspaceController:
             specification=specification,
         )
         self._last_result: WorkspaceAnalysisResult | None = None
+        self._last_decision: ToleranceDecisionResult | None = None
 
     @property
     def state(self) -> WorkspaceState:
@@ -265,6 +268,10 @@ class ToleranceWorkspaceController:
     def last_result(self) -> WorkspaceAnalysisResult | None:
         return self._last_result
 
+    @property
+    def last_decision(self) -> ToleranceDecisionResult | None:
+        return self._last_decision
+
     @classmethod
     def empty(
         cls, *, chain_name: str, analysis_mode: AnalysisMode | str
@@ -282,6 +289,7 @@ class ToleranceWorkspaceController:
         instance = cls.__new__(cls)
         instance._state = state
         instance._last_result = None
+        instance._last_decision = None
         return instance
 
     @classmethod
@@ -318,6 +326,7 @@ class ToleranceWorkspaceController:
             return
         self._state = replace(self._state, chain_name=name)
         self._last_result = None
+        self._last_decision = None
 
     def set_analysis_mode(self, analysis_mode: AnalysisMode | str) -> None:
         mode = _coerce_analysis_mode(analysis_mode)
@@ -325,6 +334,7 @@ class ToleranceWorkspaceController:
             return
         self._state = replace(self._state, analysis_mode=mode)
         self._last_result = None
+        self._last_decision = None
 
     def set_specification(
         self, specification: WorkspaceSpecification | None
@@ -356,6 +366,7 @@ class ToleranceWorkspaceController:
             self._state, schema_version=new_schema, specification=specification
         )
         self._last_result = None
+        self._last_decision = None
 
     def add_contributor(
         self,
@@ -450,6 +461,7 @@ class ToleranceWorkspaceController:
             backend_result=backend,
         )
         self._last_result = result
+        self._last_decision = None
         return result
 
     def result_view(self) -> dict[str, object]:
@@ -460,11 +472,58 @@ class ToleranceWorkspaceController:
         )
         return result.as_dict()
 
+    def evaluate_decision(self) -> ToleranceDecisionResult:
+        """Evaluate the deterministic tolerance decision using Stage 15K.
+
+        Fail-closed: raises when analysis has not been run or when the
+        applicable specification limit for the active mode is absent.
+        No engineering formula is duplicated here; all calculation is
+        delegated to :func:`~origlyph.tolerance.evaluate_tolerance_decision`.
+
+        For worst-case mode: requires ``allowed_worst_case_span``.
+        For RSS statistical mode: requires ``allowed_combined_sigma``
+        and uses the same sigma multiplier as workspace analysis.
+        """
+        if self._last_result is None:
+            raise InvalidToleranceWorkspaceError(
+                "run analysis before evaluating a decision"
+            )
+        spec = self._state.specification
+        mode = self._state.analysis_mode
+        if mode is AnalysisMode.WORST_CASE:
+            allowed_wc = spec.allowed_worst_case_span if spec is not None else None
+            if allowed_wc is None:
+                raise InvalidToleranceWorkspaceError(
+                    "allowed_worst_case_span is required for worst-case decision"
+                )
+            decision = evaluate_tolerance_decision(
+                worst_case_stack=self._worst_case_stack(),
+                allowed_worst_case_span=allowed_wc,
+            )
+        elif mode is AnalysisMode.RSS_STATISTICAL:
+            allowed_sigma = spec.allowed_combined_sigma if spec is not None else None
+            if allowed_sigma is None:
+                raise InvalidToleranceWorkspaceError(
+                    "allowed_combined_sigma is required for RSS statistical decision"
+                )
+            decision = evaluate_tolerance_decision(
+                statistical_stack=self._statistical_stack(),
+                allowed_combined_sigma=allowed_sigma,
+                sigma_multiplier=_DEFAULT_SIGMA_MULTIPLIER,
+            )
+        else:  # pragma: no cover
+            raise InvalidToleranceWorkspaceError(
+                f"unsupported analysis mode for decision: {mode!r}"
+            )
+        self._last_decision = decision
+        return decision
+
     def _replace_contributors(
         self, contributors: tuple[WorkspaceContributor, ...]
     ) -> None:
         self._state = replace(self._state, contributors=contributors)
         self._last_result = None
+        self._last_decision = None
 
     def _worst_case_stack(self) -> ToleranceStack:
         return ToleranceStack(

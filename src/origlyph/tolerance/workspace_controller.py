@@ -1,4 +1,4 @@
-"""Headless tolerance workspace controller (Stage 16D / 17A / 17B)."""
+"""Headless tolerance workspace controller (Stage 16D / 17A / 17B / 17C)."""
 
 from __future__ import annotations
 
@@ -21,6 +21,12 @@ from .models import (
     ToleranceDecisionResult,
     ToleranceStack,
     WorstCaseResult,
+)
+from .sensitivity import (
+    StatisticalSensitivityResult,
+    WorstCaseSensitivityResult,
+    statistical_sensitivity,
+    worst_case_sensitivity,
 )
 from .statistical import statistical
 from .worst_case import worst_case
@@ -247,6 +253,9 @@ class ToleranceWorkspaceController:
         )
         self._last_result: WorkspaceAnalysisResult | None = None
         self._last_decision: ToleranceDecisionResult | None = None
+        self._last_sensitivity: (
+            WorstCaseSensitivityResult | StatisticalSensitivityResult | None
+        ) = None
 
     @property
     def state(self) -> WorkspaceState:
@@ -272,6 +281,12 @@ class ToleranceWorkspaceController:
     def last_decision(self) -> ToleranceDecisionResult | None:
         return self._last_decision
 
+    @property
+    def last_sensitivity(
+        self,
+    ) -> WorstCaseSensitivityResult | StatisticalSensitivityResult | None:
+        return self._last_sensitivity
+
     @classmethod
     def empty(
         cls, *, chain_name: str, analysis_mode: AnalysisMode | str
@@ -290,6 +305,7 @@ class ToleranceWorkspaceController:
         instance._state = state
         instance._last_result = None
         instance._last_decision = None
+        instance._last_sensitivity = None
         return instance
 
     @classmethod
@@ -327,6 +343,7 @@ class ToleranceWorkspaceController:
         self._state = replace(self._state, chain_name=name)
         self._last_result = None
         self._last_decision = None
+        self._last_sensitivity = None
 
     def set_analysis_mode(self, analysis_mode: AnalysisMode | str) -> None:
         mode = _coerce_analysis_mode(analysis_mode)
@@ -335,6 +352,7 @@ class ToleranceWorkspaceController:
         self._state = replace(self._state, analysis_mode=mode)
         self._last_result = None
         self._last_decision = None
+        self._last_sensitivity = None
 
     def set_specification(
         self, specification: WorkspaceSpecification | None
@@ -518,12 +536,48 @@ class ToleranceWorkspaceController:
         self._last_decision = decision
         return decision
 
+    def run_sensitivity(
+        self,
+    ) -> WorstCaseSensitivityResult | StatisticalSensitivityResult:
+        """Run deterministic sensitivity analysis using Stage 15F.
+
+        Fail-closed: raises when there are no contributors.
+        No engineering formula is duplicated here; all calculation is
+        delegated to the Stage 15F sensitivity API.
+
+        For worst-case mode: delegates to
+        :func:`~origlyph.tolerance.worst_case_sensitivity`.
+        For RSS statistical mode: delegates to
+        :func:`~origlyph.tolerance.statistical_sensitivity`
+        using the same sigma multiplier as workspace analysis.
+        """
+        if not self.contributors:
+            raise InvalidToleranceWorkspaceError(
+                "workspace requires at least one contributor"
+            )
+        mode = self._state.analysis_mode
+        if mode is AnalysisMode.WORST_CASE:
+            result = worst_case_sensitivity(self._worst_case_stack())
+        elif mode is AnalysisMode.RSS_STATISTICAL:
+            result = statistical_sensitivity(
+                self._statistical_stack(),
+                sigma_multiplier=_DEFAULT_SIGMA_MULTIPLIER,
+                correlations=(),
+            )
+        else:  # pragma: no cover
+            raise InvalidToleranceWorkspaceError(
+                f"unsupported analysis mode for sensitivity: {mode!r}"
+            )
+        self._last_sensitivity = result
+        return result
+
     def _replace_contributors(
         self, contributors: tuple[WorkspaceContributor, ...]
     ) -> None:
         self._state = replace(self._state, contributors=contributors)
         self._last_result = None
         self._last_decision = None
+        self._last_sensitivity = None
 
     def _worst_case_stack(self) -> ToleranceStack:
         return ToleranceStack(

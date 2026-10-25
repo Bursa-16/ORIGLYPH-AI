@@ -1,4 +1,4 @@
-"""Thin Tkinter tolerance workspace view (Stage 16D / 17A / 17B)."""
+"""Thin Tkinter tolerance workspace view (Stage 16D / 17A / 17B / 17C)."""
 
 from __future__ import annotations
 
@@ -13,6 +13,10 @@ from .models import (
     ToleranceDecisionResult,
     ToleranceDecisionSeverity,
 )
+from .sensitivity import (
+    StatisticalSensitivityResult,
+    WorstCaseSensitivityResult,
+)
 from .workspace_controller import (
     AnalysisMode,
     InvalidToleranceWorkspaceError,
@@ -25,6 +29,7 @@ __all__ = ["ToleranceWorkspaceView", "WorkspaceSession", "launch_tolerance_works
 
 _NO_RESULT_TEXT = "No result"
 _NO_DECISION_TEXT = "NOT EVALUATED"
+_NO_SENSITIVITY_TEXT = "NOT RUN"
 
 
 def _numeric_detail_parts(
@@ -153,6 +158,36 @@ class WorkspaceSession:
         """Delegate decision evaluation to the controller."""
         return self.controller.evaluate_decision()
 
+    def sensitivity_rows(self) -> list[dict[str, object]]:
+        """Presentation rows for the sensitivity table; empty when not run."""
+        sensitivity = self.controller.last_sensitivity
+        if sensitivity is None:
+            return []
+        rows: list[dict[str, object]] = []
+        if isinstance(sensitivity, WorstCaseSensitivityResult):
+            for rank, impact in enumerate(sensitivity.impacts, start=1):
+                rows.append({
+                    "rank": rank,
+                    "name": impact.name,
+                    "impact": impact.span,
+                    "share_pct": impact.percentage,
+                })
+        else:
+            for rank, contribution in enumerate(sensitivity.contributions, start=1):
+                rows.append({
+                    "rank": rank,
+                    "name": contribution.name,
+                    "impact": contribution.variance,
+                    "share_pct": contribution.percentage,
+                })
+        return rows
+
+    def run_sensitivity(
+        self,
+    ) -> WorstCaseSensitivityResult | StatisticalSensitivityResult:
+        """Delegate sensitivity execution to the controller."""
+        return self.controller.run_sensitivity()
+
     def run_analysis(self) -> WorkspaceAnalysisResult:
         return self.controller.run_analysis()
 
@@ -207,6 +242,7 @@ class ToleranceWorkspaceView:
         self._result = tk.StringVar(value=self._session.result_text)
         self._decision_status = tk.StringVar(value=_NO_DECISION_TEXT)
         self._decision_detail = tk.StringVar(value="")
+        self._sensitivity_tree: Any = None
         self._build()
         self._refresh_rows()
 
@@ -350,6 +386,25 @@ class ToleranceWorkspaceView:
             row=1, column=0, columnspan=2, sticky="w", pady=(4, 0)
         )
 
+        sensitivity = ttk.Labelframe(main, text="Sensitivity", padding=8)
+        sensitivity.grid(row=7, column=0, sticky="ew", pady=(8, 0))
+        sensitivity.columnconfigure(0, weight=1)
+        ttk.Button(
+            sensitivity, text="Run Sensitivity", command=self._run_sensitivity
+        ).pack(side="top", anchor="w")
+        self._sensitivity_tree = ttk.Treeview(
+            sensitivity,
+            columns=("rank", "name", "impact", "share"),
+            show="headings",
+            height=5,
+        )
+        _sens_cols = (("rank", "Rank", 50), ("name", "Contributor", 160),
+                      ("impact", "Impact", 110), ("share", "Share %", 80))
+        for key, label, width in _sens_cols:
+            self._sensitivity_tree.heading(key, text=label)
+            self._sensitivity_tree.column(key, width=width, stretch=True)
+        self._sensitivity_tree.pack(side="top", fill="x", pady=(6, 0))
+
         storage = ttk.Labelframe(main, text="Save / load", padding=8)
         storage.grid(row=6, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(storage, text="Open", command=self._open).pack(side="left")
@@ -382,6 +437,7 @@ class ToleranceWorkspaceView:
         """Keep the Results label in step with the controller cache."""
         self._result.set(self._session.result_text)
         self._refresh_decision()
+        self._refresh_sensitivity()
 
     def _refresh_decision(self) -> None:
         """Keep the Decision labels in step with the controller cache."""
@@ -395,6 +451,31 @@ class ToleranceWorkspaceView:
         self._sync_header()
         self._session.evaluate_decision()
         self._refresh_decision()
+
+    def _refresh_sensitivity(self) -> None:
+        """Keep the Sensitivity treeview in step with the controller cache."""
+        tree = self._sensitivity_tree
+        for row_id in tree.get_children():
+            tree.delete(row_id)
+        for row in self._session.sensitivity_rows():
+            tree.insert(
+                "",
+                "end",
+                values=(
+                    row["rank"],
+                    row["name"],
+                    f"{row['impact']:.6g}",
+                    f"{row['share_pct']:.1f}%",
+                ),
+            )
+
+    def _run_sensitivity(self) -> None:
+        self._guard(lambda: self._run_sensitivity_impl())
+
+    def _run_sensitivity_impl(self) -> None:
+        self._sync_header()
+        self._session.run_sensitivity()
+        self._refresh_sensitivity()
 
     def _clear_form(self) -> None:
         for var in (self._identifier, self._name, self._nominal, self._tolerance):

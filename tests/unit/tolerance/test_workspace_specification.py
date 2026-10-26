@@ -517,21 +517,21 @@ def test_session_both_limits_sync() -> None:
 def test_session_invalid_value_surfaced() -> None:
     session = WorkspaceSession(_controller())
     session.allowed_wc_span = "not-a-number"
-    with pytest.raises(InvalidToleranceWorkspaceError, match="numeric"):
+    with pytest.raises(InvalidToleranceWorkspaceError, match="enter a valid number"):
         session.sync_specification()
 
 
 def test_session_negative_value_surfaced() -> None:
     session = WorkspaceSession(_controller())
     session.allowed_wc_span = "-1.0"
-    with pytest.raises(InvalidToleranceWorkspaceError, match="positive"):
+    with pytest.raises(InvalidToleranceWorkspaceError, match="greater than zero"):
         session.sync_specification()
 
 
 def test_session_zero_value_surfaced() -> None:
     session = WorkspaceSession(_controller())
     session.allowed_wc_span = "0"
-    with pytest.raises(InvalidToleranceWorkspaceError, match="positive"):
+    with pytest.raises(InvalidToleranceWorkspaceError, match="greater than zero"):
         session.sync_specification()
 
 

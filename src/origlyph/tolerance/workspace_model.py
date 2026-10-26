@@ -36,6 +36,10 @@ _NO_DECISION_TEXT = "NOT EVALUATED"
 _NO_SENSITIVITY_TEXT = "NOT RUN"
 _NO_BUDGET_TEXT = "NOT RUN"
 _NO_ALLOCATION_VALIDATION_TEXT = "NOT VALIDATED"
+_MODE_DISPLAY_NAMES: dict[str, str] = {
+    "worst_case": "Worst Case",
+    "rss_statistical": "RSS Statistical",
+}
 
 
 def _numeric_detail_parts(
@@ -75,11 +79,13 @@ def _parse_opt_positive_str(value: str, label: str) -> float | None:
     try:
         numeric = float(stripped)
     except ValueError as exc:
-        raise InvalidToleranceWorkspaceError(f"{label}: must be numeric") from exc
+        raise InvalidToleranceWorkspaceError(
+            f"{label}: enter a valid number (e.g. 1.0)"
+        ) from exc
     if not math.isfinite(numeric):
-        raise InvalidToleranceWorkspaceError(f"{label}: must be finite")
+        raise InvalidToleranceWorkspaceError(f"{label}: must be a finite number")
     if numeric <= 0.0:
-        raise InvalidToleranceWorkspaceError(f"{label}: must be strictly positive")
+        raise InvalidToleranceWorkspaceError(f"{label}: must be greater than zero")
     return numeric
 
 
@@ -88,16 +94,22 @@ def _parse_non_negative_str(value: str, label: str) -> float:
     stripped = value.strip()
     if not stripped:
         raise InvalidToleranceWorkspaceError(
-            f"{label}: allocated span is required"
+            f'Allocated span for "{label}" is required.'
         )
     try:
         numeric = float(stripped)
     except ValueError as exc:
-        raise InvalidToleranceWorkspaceError(f"{label}: must be numeric") from exc
+        raise InvalidToleranceWorkspaceError(
+            f'Allocated span for "{label}": enter a valid number (e.g. 0.4).'
+        ) from exc
     if not math.isfinite(numeric):
-        raise InvalidToleranceWorkspaceError(f"{label}: must be finite")
+        raise InvalidToleranceWorkspaceError(
+            f'Allocated span for "{label}": must be a finite number.'
+        )
     if numeric < 0.0:
-        raise InvalidToleranceWorkspaceError(f"{label}: must be non-negative")
+        raise InvalidToleranceWorkspaceError(
+            f'Allocated span for "{label}": must be zero or greater.'
+        )
     return numeric
 
 
@@ -128,10 +140,14 @@ class WorkspaceSession:
         result = self.controller.last_result
         if result is None:
             return _NO_RESULT_TEXT
-        values = ", ".join(
-            f"{key}={value:.6g}" for key, value in result.summary_values.items()
+        mode_label = _MODE_DISPLAY_NAMES.get(
+            result.analysis_mode.value, result.analysis_mode.value
         )
-        return f"{result.analysis_mode.value}: {values}"
+        values = "  |  ".join(
+            f"{key.replace('_', ' ')}: {value:.6g}"
+            for key, value in result.summary_values.items()
+        )
+        return f"{mode_label}  —  {values}"
 
     def sync_header(self) -> None:
         """Push header fields into the controller without rebuilding it.
@@ -289,7 +305,7 @@ class WorkspaceSession:
         budget = _parse_opt_positive_str(self.allocation_budget, "allocation budget")
         if budget is None:
             raise InvalidToleranceWorkspaceError(
-                "allocation budget is required"
+                "Allocation budget is required. Enter a positive number."
             )
         entries = []
         for c in self.controller.contributors:
@@ -404,7 +420,9 @@ class ToleranceWorkspaceView:
         )
         self._on_error = on_error
         self.root = tk.Tk()
-        self.root.title("Origlyph Tolerance Workspace")
+        self.root.title("Origlyph  ·  Tolerance Workspace")
+        self.root.minsize(820, 640)
+        self.root.geometry("960x800")
         self._chain_name = tk.StringVar(value=self.controller.state.chain_name)
         self._analysis_mode = tk.StringVar(
             value=self.controller.analysis_mode.value
@@ -454,11 +472,28 @@ class ToleranceWorkspaceView:
         self.root.mainloop()
 
     def _build(self) -> None:
+        tk = self._tk
         ttk = self._ttk
-        main = ttk.Frame(self.root, padding=12)
-        main.grid(row=0, column=0, sticky="nsew")
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
+        _canvas = tk.Canvas(self.root, highlightthickness=0)
+        _sb = ttk.Scrollbar(self.root, orient="vertical", command=_canvas.yview)
+        _canvas.configure(yscrollcommand=_sb.set)
+        _sb.pack(side="right", fill="y")
+        _canvas.pack(side="left", fill="both", expand=True)
+        main = ttk.Frame(_canvas, padding=12)
+        _win = _canvas.create_window((0, 0), window=main, anchor="nw")
+        main.columnconfigure(0, weight=1)
+        main.bind(
+            "<Configure>",
+            lambda _e: _canvas.configure(scrollregion=_canvas.bbox("all")),
+        )
+        _canvas.bind(
+            "<Configure>",
+            lambda _e: _canvas.itemconfigure(_win, width=_e.width),
+        )
+        _canvas.bind(
+            "<MouseWheel>",
+            lambda _e: _canvas.yview_scroll(int(-1 * (_e.delta / 120)), "units"),
+        )
         fields = (
             ("Id", self._identifier),
             ("Name", self._name),
@@ -562,7 +597,9 @@ class ToleranceWorkspaceView:
 
         control = ttk.Labelframe(main, text="Analysis control", padding=8)
         control.grid(row=3, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(control, text="Run", command=self._run_analysis).pack(side="left")
+        ttk.Button(
+            control, text="Run Analysis", command=self._run_analysis
+        ).pack(side="left")
 
         results = ttk.Labelframe(main, text="Results", padding=8)
         results.grid(row=4, column=0, sticky="ew", pady=(8, 0))
@@ -587,7 +624,7 @@ class ToleranceWorkspaceView:
         )
 
         sensitivity = ttk.Labelframe(main, text="Sensitivity", padding=8)
-        sensitivity.grid(row=7, column=0, sticky="ew", pady=(8, 0))
+        sensitivity.grid(row=6, column=0, sticky="ew", pady=(8, 0))
         sensitivity.columnconfigure(0, weight=1)
         ttk.Button(
             sensitivity, text="Run Sensitivity", command=self._run_sensitivity
@@ -606,7 +643,7 @@ class ToleranceWorkspaceView:
         self._sensitivity_tree.pack(side="top", fill="x", pady=(6, 0))
 
         budget_frame = ttk.Labelframe(main, text="Budget", padding=8)
-        budget_frame.grid(row=8, column=0, sticky="ew", pady=(8, 0))
+        budget_frame.grid(row=7, column=0, sticky="ew", pady=(8, 0))
         budget_frame.columnconfigure(0, weight=1)
         ttk.Button(
             budget_frame, text="Run Budget", command=self._run_budget
@@ -637,15 +674,15 @@ class ToleranceWorkspaceView:
             self._budget_tree.column(key, width=width, stretch=True)
         self._budget_tree.pack(side="top", fill="x", pady=(6, 0))
 
-        storage = ttk.Labelframe(main, text="Save / load", padding=8)
-        storage.grid(row=6, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(storage, text="Open", command=self._open).pack(side="left")
-        ttk.Button(storage, text="Save", command=self._save).pack(
+        storage = ttk.Labelframe(main, text="Project File", padding=8)
+        storage.grid(row=10, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(storage, text="Open Project", command=self._open).pack(side="left")
+        ttk.Button(storage, text="Save Project", command=self._save).pack(
             side="left", padx=(8, 0)
         )
 
         alloc_plan = ttk.Labelframe(main, text="Allocation Plan", padding=8)
-        alloc_plan.grid(row=9, column=0, sticky="ew", pady=(8, 0))
+        alloc_plan.grid(row=8, column=0, sticky="ew", pady=(8, 0))
         alloc_plan.columnconfigure(3, weight=1)
         ttk.Label(alloc_plan, text="Allocation Budget").grid(
             row=0, column=0, sticky="w"
@@ -699,7 +736,7 @@ class ToleranceWorkspaceView:
         ).pack(side="left")
         ttk.Button(
             alloc_btn_row,
-            text="Clear Plan",
+            text="Clear Allocation Plan",
             command=self._clear_allocation_plan_action,
         ).pack(side="left", padx=(8, 0))
         ttk.Button(
@@ -711,7 +748,7 @@ class ToleranceWorkspaceView:
         alloc_result = ttk.Labelframe(
             main, text="Allocation Validation Result", padding=8
         )
-        alloc_result.grid(row=10, column=0, sticky="ew", pady=(8, 0))
+        alloc_result.grid(row=9, column=0, sticky="ew", pady=(8, 0))
         alloc_result.columnconfigure(1, weight=1)
         ttk.Label(alloc_result, text="Status:").grid(row=0, column=0, sticky="w")
         ttk.Label(

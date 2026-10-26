@@ -56,7 +56,7 @@ def test_view_save_persists_last_computed_result(tmp_path: Path) -> None:
     assert loaded.tolerance_state.result_identities == (result.result_id,)
     assert loaded.tolerance_state.summary_values == result.summary_values
     assert loaded.tolerance_state.summary_values
-    assert session.result_text.startswith("worst_case:")
+    assert session.result_text.startswith("Worst Case")
 
 
 def test_save_before_analysis_persists_no_result_evidence(tmp_path: Path) -> None:

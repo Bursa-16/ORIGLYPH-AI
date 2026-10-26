@@ -12,6 +12,7 @@ from .models import (
     ToleranceDecisionEvidence,
     ToleranceDecisionResult,
     ToleranceDecisionSeverity,
+    WorstCaseBudgetResult,
 )
 from .sensitivity import (
     StatisticalSensitivityResult,
@@ -30,6 +31,7 @@ __all__ = ["ToleranceWorkspaceView", "WorkspaceSession", "launch_tolerance_works
 _NO_RESULT_TEXT = "No result"
 _NO_DECISION_TEXT = "NOT EVALUATED"
 _NO_SENSITIVITY_TEXT = "NOT RUN"
+_NO_BUDGET_TEXT = "NOT RUN"
 
 
 def _numeric_detail_parts(
@@ -191,6 +193,47 @@ class WorkspaceSession:
     def run_analysis(self) -> WorkspaceAnalysisResult:
         return self.controller.run_analysis()
 
+    @property
+    def budget_status_text(self) -> str:
+        """Presentation text for the current budget state; never stale."""
+        budget = self.controller.last_budget
+        if budget is None:
+            return _NO_BUDGET_TEXT
+        return budget.status.value.upper()
+
+    @property
+    def budget_summary_text(self) -> str:
+        """Compact summary: Budget / Consumed / Remaining / Utilization."""
+        budget = self.controller.last_budget
+        if budget is None:
+            return ""
+        return (
+            f"Budget: {budget.allowed_span:.6g}  "
+            f"Consumed: {budget.actual_span:.6g}  "
+            f"Remaining: {budget.remaining_margin:.6g}  "
+            f"Utilization: {budget.utilization_percentage:.1f}%"
+        )
+
+    def budget_rows(self) -> list[dict[str, object]]:
+        """Presentation rows for the budget contribution table; empty when not run."""
+        budget = self.controller.last_budget
+        if budget is None:
+            return []
+        rows: list[dict[str, object]] = []
+        for rank, contrib in enumerate(budget.contributions, start=1):
+            rows.append({
+                "rank": rank,
+                "name": contrib.name,
+                "span": contrib.span,
+                "pct_consumed": contrib.percentage_of_consumed,
+                "pct_allowed": contrib.percentage_of_allowed,
+            })
+        return rows
+
+    def run_budget(self) -> WorstCaseBudgetResult:
+        """Delegate budget execution to the controller."""
+        return self.controller.run_budget()
+
     def save_project(
         self, path: str | Path, *, project_name: str | None = None
     ) -> Path:
@@ -243,6 +286,9 @@ class ToleranceWorkspaceView:
         self._decision_status = tk.StringVar(value=_NO_DECISION_TEXT)
         self._decision_detail = tk.StringVar(value="")
         self._sensitivity_tree: Any = None
+        self._budget_status = tk.StringVar(value=_NO_BUDGET_TEXT)
+        self._budget_summary = tk.StringVar(value="")
+        self._budget_tree: Any = None
         self._build()
         self._refresh_rows()
 
@@ -405,6 +451,38 @@ class ToleranceWorkspaceView:
             self._sensitivity_tree.column(key, width=width, stretch=True)
         self._sensitivity_tree.pack(side="top", fill="x", pady=(6, 0))
 
+        budget_frame = ttk.Labelframe(main, text="Budget", padding=8)
+        budget_frame.grid(row=8, column=0, sticky="ew", pady=(8, 0))
+        budget_frame.columnconfigure(0, weight=1)
+        ttk.Button(
+            budget_frame, text="Run Budget", command=self._run_budget
+        ).pack(side="top", anchor="w")
+        ttk.Label(
+            budget_frame,
+            textvariable=self._budget_status,
+            font=("", 10, "bold"),
+        ).pack(side="top", anchor="w", pady=(4, 0))
+        ttk.Label(
+            budget_frame, textvariable=self._budget_summary
+        ).pack(side="top", anchor="w", pady=(2, 0))
+        self._budget_tree = ttk.Treeview(
+            budget_frame,
+            columns=("rank", "name", "span", "pct_consumed", "pct_allowed"),
+            show="headings",
+            height=4,
+        )
+        _budget_cols = (
+            ("rank", "Rank", 50),
+            ("name", "Contributor", 160),
+            ("span", "Span", 110),
+            ("pct_consumed", "% Consumed", 90),
+            ("pct_allowed", "% Budget", 90),
+        )
+        for key, label, width in _budget_cols:
+            self._budget_tree.heading(key, text=label)
+            self._budget_tree.column(key, width=width, stretch=True)
+        self._budget_tree.pack(side="top", fill="x", pady=(6, 0))
+
         storage = ttk.Labelframe(main, text="Save / load", padding=8)
         storage.grid(row=6, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(storage, text="Open", command=self._open).pack(side="left")
@@ -438,6 +516,7 @@ class ToleranceWorkspaceView:
         self._result.set(self._session.result_text)
         self._refresh_decision()
         self._refresh_sensitivity()
+        self._refresh_budget()
 
     def _refresh_decision(self) -> None:
         """Keep the Decision labels in step with the controller cache."""
@@ -607,6 +686,34 @@ class ToleranceWorkspaceView:
         if previous is not None and self._rows.exists(previous):
             self._rows.selection_set(previous)
             self._rows.see(previous)
+
+    def _run_budget(self) -> None:
+        self._guard(lambda: self._run_budget_impl())
+
+    def _run_budget_impl(self) -> None:
+        self._sync_header()
+        self._session.run_budget()
+        self._refresh_budget()
+
+    def _refresh_budget(self) -> None:
+        """Keep the Budget panel in step with the controller cache."""
+        self._budget_status.set(self._session.budget_status_text)
+        self._budget_summary.set(self._session.budget_summary_text)
+        tree = self._budget_tree
+        for row_id in tree.get_children():
+            tree.delete(row_id)
+        for row in self._session.budget_rows():
+            tree.insert(
+                "",
+                "end",
+                values=(
+                    row["rank"],
+                    row["name"],
+                    f"{row['span']:.6g}",
+                    f"{row['pct_consumed']:.1f}%",
+                    f"{row['pct_allowed']:.1f}%",
+                ),
+            )
 
     def _guard(self, action: Callable[[], Any]) -> None:
         try:

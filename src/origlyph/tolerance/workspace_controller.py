@@ -10,6 +10,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from .budget import worst_case_budget
 from .decision import evaluate_tolerance_decision
 from .exceptions import OriglyphToleranceError
 from .models import (
@@ -20,6 +21,7 @@ from .models import (
     ToleranceContribution,
     ToleranceDecisionResult,
     ToleranceStack,
+    WorstCaseBudgetResult,
     WorstCaseResult,
 )
 from .sensitivity import (
@@ -256,6 +258,7 @@ class ToleranceWorkspaceController:
         self._last_sensitivity: (
             WorstCaseSensitivityResult | StatisticalSensitivityResult | None
         ) = None
+        self._last_budget: WorstCaseBudgetResult | None = None
 
     @property
     def state(self) -> WorkspaceState:
@@ -287,6 +290,10 @@ class ToleranceWorkspaceController:
     ) -> WorstCaseSensitivityResult | StatisticalSensitivityResult | None:
         return self._last_sensitivity
 
+    @property
+    def last_budget(self) -> WorstCaseBudgetResult | None:
+        return self._last_budget
+
     @classmethod
     def empty(
         cls, *, chain_name: str, analysis_mode: AnalysisMode | str
@@ -306,6 +313,7 @@ class ToleranceWorkspaceController:
         instance._last_result = None
         instance._last_decision = None
         instance._last_sensitivity = None
+        instance._last_budget = None
         return instance
 
     @classmethod
@@ -344,6 +352,7 @@ class ToleranceWorkspaceController:
         self._last_result = None
         self._last_decision = None
         self._last_sensitivity = None
+        self._last_budget = None
 
     def set_analysis_mode(self, analysis_mode: AnalysisMode | str) -> None:
         mode = _coerce_analysis_mode(analysis_mode)
@@ -353,6 +362,7 @@ class ToleranceWorkspaceController:
         self._last_result = None
         self._last_decision = None
         self._last_sensitivity = None
+        self._last_budget = None
 
     def set_specification(
         self, specification: WorkspaceSpecification | None
@@ -385,6 +395,7 @@ class ToleranceWorkspaceController:
         )
         self._last_result = None
         self._last_decision = None
+        self._last_budget = None
 
     def add_contributor(
         self,
@@ -571,6 +582,43 @@ class ToleranceWorkspaceController:
         self._last_sensitivity = result
         return result
 
+    def run_budget(self) -> WorstCaseBudgetResult:
+        """Run deterministic worst-case tolerance budget analysis using Stage 15G.
+
+        Fail-closed: raises when there are no contributors, when
+        ``allowed_worst_case_span`` is absent, or when the active analysis
+        mode does not support budget analysis in Stage 17D.
+        No engineering formula is duplicated here; all calculation is
+        delegated to :func:`~origlyph.tolerance.worst_case_budget`.
+
+        Only WORST_CASE mode is supported.  RSS statistical budget requires a
+        dedicated allowed-span input not yet represented in workspace v2 and
+        is deferred to a later stage.
+        """
+        if not self.contributors:
+            raise InvalidToleranceWorkspaceError(
+                "workspace requires at least one contributor"
+            )
+        mode = self._state.analysis_mode
+        if mode is AnalysisMode.RSS_STATISTICAL:
+            raise InvalidToleranceWorkspaceError(
+                "RSS statistical budget requires a separate allowed span input "
+                "not represented in workspace v2; deferred to a later stage"
+            )
+        if mode is not AnalysisMode.WORST_CASE:  # pragma: no cover
+            raise InvalidToleranceWorkspaceError(
+                f"unsupported analysis mode for budget: {mode!r}"
+            )
+        spec = self._state.specification
+        allowed_wc = spec.allowed_worst_case_span if spec is not None else None
+        if allowed_wc is None:
+            raise InvalidToleranceWorkspaceError(
+                "allowed_worst_case_span is required for worst-case budget"
+            )
+        result = worst_case_budget(self._worst_case_stack(), allowed_wc)
+        self._last_budget = result
+        return result
+
     def _replace_contributors(
         self, contributors: tuple[WorkspaceContributor, ...]
     ) -> None:
@@ -578,6 +626,7 @@ class ToleranceWorkspaceController:
         self._last_result = None
         self._last_decision = None
         self._last_sensitivity = None
+        self._last_budget = None
 
     def _worst_case_stack(self) -> ToleranceStack:
         return ToleranceStack(

@@ -615,6 +615,19 @@ preserves winding-derived face geometry as authoritative
 requires manual PRIMARY / SECONDARY / TERTIARY role assignment
 prevents the same candidate from occupying multiple DRF roles
 does not automatically rank or recommend datum features
+
+Tolerance Workspace Demo
+
+Windows launch:
+
+scripts\run_tolerance_demo.ps1
+
+Or double-click scripts\run_tolerance_demo.cmd.
+
+Demo guide: docs\demo\customer_demo_runbook.md
+
+Quick one-page reference: docs\demo\customer_demo_cheat_sheet.md
+
 Verification
 
 Development quality gates:

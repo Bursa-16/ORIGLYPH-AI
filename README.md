@@ -3,9 +3,9 @@
 ## Project Identity
 
 * **Name:** Origlyph
-* **Current status:** Sixth public alpha — deterministic CAD, datum, tolerance-analysis, audit, and governed-acceptance engineering foundation with interactive desktop GUI, persisted project model, and tolerance workspace
-* **Package version:** `0.4.0a6`
-* **Current release/tag:** `v0.4.0-alpha.6`
+* **Current status:** Seventh public alpha — deterministic CAD, datum, tolerance-analysis, audit, and governed-acceptance engineering foundation with interactive desktop GUI, persisted project model, tolerance workspace, and allocation plan editor with explicit validation workflow
+* **Package version:** `0.4.0a7`
+* **Current release/tag:** `v0.4.0-alpha.7`
 
 ## Purpose
 
@@ -27,9 +27,11 @@ everything else is roadmap, not implementation.
 
 ## Current Development Status
 
-v0.4.0-alpha.6 adds the deterministic persisted project model and the interactive
-tolerance workspace foundation on top of the Stage 15 tolerance and
-governed-acceptance architecture.
+v0.4.0-alpha.7 completes the tolerance workspace productization arc (Stages 17A–17E-3),
+adding specification-aware analysis, PASS/FAIL decision evaluation, sensitivity
+inspection, budget inspection, workspace v3 allocation plan contract and persistence,
+allocation validation controller/session, and the interactive Allocation Plan editor
+with explicit Validate Allocation workflow.
 
 The current release includes:
 
@@ -66,6 +68,12 @@ The current release includes:
 * final governed acceptance closure manifest
 * deterministic persisted project model v1 (save/load with tamper-evident project identity)
 * interactive 1D tolerance workspace (worst-case and RSS statistical analysis) with deterministic result persistence
+* specification-aware PASS/FAIL tolerance decision evaluation
+* sensitivity inspection (per-contributor impact and share)
+* budget inspection (worst-case; per-contributor span and budget utilization)
+* workspace v3 allocation plan contract (authoritative persistence, project-identity integration)
+* allocation validation via Stage 15 engine (fail-closed, explicit-only action)
+* interactive Allocation Plan editor with Apply Allocation Plan and Validate Allocation workflow
 
 The tolerance and governed-acceptance pipeline has been architecture-audited for
 determinism, canonical serialization, fail-closed behaviour, identity integrity,
@@ -616,46 +624,44 @@ py -m pytest -q
 py -m ruff check src tests
 py -m pyright
 
-Verified release baseline for v0.4.0-alpha.6:
+Verified release baseline for v0.4.0-alpha.7:
 
 Project tests: 26 passed
-Workspace controller tests: 11 passed
-Workspace persistence tests: 7 passed
-Workspace view tests: 7 passed
-Tolerance tests: 766 passed
-Full test suite: 1326 passed
+Tolerance tests: 1086 passed
+Full test suite: 1646 passed
 Ruff: PASS
 Pyright: PASS — 0 errors, 0 warnings
 
-Stage 16E project identity integrity and release-readiness assessment
-concluded:
+Stage 17E-4 integration and release-readiness assessment concluded:
 
-ALPHA6_RELEASE_READY
+ALPHA7_RELEASE_READY
 
 Release
 
 Current prerelease:
 
-v0.4.0-alpha.6
+v0.4.0-alpha.7
 
 Package version:
 
-0.4.0a6
+0.4.0a7
 
 Release notes:
 
-RELEASE_NOTES_v0.4.0-alpha.6.md
+RELEASE_NOTES_v0.4.0-alpha.7.md
 
 Release status:
 
 PRE-RELEASE / ALPHA
 
-The release adds the persisted project model v1, the tolerance workspace
-foundation v1, and their deterministic identity and persistence semantics.
+The release completes the tolerance workspace productization arc (Stages 17A–17E-3)
+with specification-aware decision evaluation, sensitivity and budget inspection,
+workspace v3 allocation plan persistence, allocation validation, and the
+interactive Allocation Plan editor UI.
 
 Previous release:
 
-v0.4.0-alpha.5
+v0.4.0-alpha.6
 Future / Non-Blocking Work
 
 The following items remain future work and are not release blockers for the

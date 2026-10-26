@@ -10,14 +10,18 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from .allocation import validate_allocation as _stage15_validate_allocation
 from .budget import worst_case_budget
 from .decision import evaluate_tolerance_decision
 from .exceptions import OriglyphToleranceError
 from .models import (
+    AllocationPlan,
+    AllocationValidationResult,
     StackDirection,
     StatisticalContribution,
     StatisticalResult,
     StatisticalStack,
+    ToleranceAllocation,
     ToleranceContribution,
     ToleranceDecisionResult,
     ToleranceStack,
@@ -374,6 +378,7 @@ class ToleranceWorkspaceController:
             WorstCaseSensitivityResult | StatisticalSensitivityResult | None
         ) = None
         self._last_budget: WorstCaseBudgetResult | None = None
+        self._last_allocation_validation: AllocationValidationResult | None = None
 
     @property
     def state(self) -> WorkspaceState:
@@ -409,6 +414,10 @@ class ToleranceWorkspaceController:
     def last_budget(self) -> WorstCaseBudgetResult | None:
         return self._last_budget
 
+    @property
+    def last_allocation_validation(self) -> AllocationValidationResult | None:
+        return self._last_allocation_validation
+
     @classmethod
     def empty(
         cls, *, chain_name: str, analysis_mode: AnalysisMode | str
@@ -429,6 +438,7 @@ class ToleranceWorkspaceController:
         instance._last_decision = None
         instance._last_sensitivity = None
         instance._last_budget = None
+        instance._last_allocation_validation = None
         return instance
 
     @classmethod
@@ -497,10 +507,15 @@ class ToleranceWorkspaceController:
             )
         if specification == self._state.specification:
             return
+        _v2 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2
+        _v3 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3
+        current = self._state.schema_version
         if specification is not None:
-            new_schema = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2
-        elif self._state.schema_version == TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2:
-            new_schema = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2
+            # v3 takes precedence: a v3 workspace already carries allocation_plan
+            # and cannot be downgraded to v2.
+            new_schema = _v3 if current == _v3 else _v2
+        elif current in (_v2, _v3):
+            new_schema = current
         else:
             # v1 → clearing already-None spec: genuine no-op (guarded above).
             # This branch is unreachable; guard it for safety.
@@ -734,6 +749,56 @@ class ToleranceWorkspaceController:
         self._last_budget = result
         return result
 
+    def validate_allocation(self) -> AllocationValidationResult:
+        """Validate the workspace allocation plan (Stage 17E-2).
+
+        Adapts the workspace v3 ``allocation_plan`` to the Stage 15 engine types,
+        delegates to :func:`~origlyph.tolerance.allocation.validate_allocation`,
+        and caches the result as derived runtime evidence.
+
+        Fail-closed:
+
+        - Raises :class:`InvalidToleranceWorkspaceError` when ``allocation_plan``
+          is absent.
+        - Raises :class:`InvalidToleranceWorkspaceError` when any allocation
+          entry references a contributor not present in the workspace.
+        - Propagates :class:`~origlyph.tolerance.InvalidAllocationError` from
+          Stage 15 on completeness failure (missing contributors in the plan).
+
+        Does not mutate the allocation plan.
+        Does not perform auto-allocation or optimization.
+        Running validation alone does not rotate the project identity.
+        """
+        plan = self._state.allocation_plan
+        if plan is None:
+            raise InvalidToleranceWorkspaceError(
+                "allocation_plan is required to validate allocation"
+            )
+        if not self.contributors:
+            raise InvalidToleranceWorkspaceError(
+                "workspace requires at least one contributor for allocation validation"
+            )
+        contributor_ids = {c.identifier for c in self.contributors}
+        for entry in plan.entries:
+            if entry.contributor_id not in contributor_ids:
+                raise InvalidToleranceWorkspaceError(
+                    f"allocation entry references unknown contributor "
+                    f"{entry.contributor_id!r}"
+                )
+        stage15_plan = AllocationPlan(
+            allowed_budget=plan.allowed_budget,
+            allocations=tuple(
+                ToleranceAllocation(
+                    contributor_id=e.contributor_id,
+                    allocated_span=e.allocated_span,
+                )
+                for e in plan.entries
+            ),
+        )
+        result = _stage15_validate_allocation(self._worst_case_stack(), stage15_plan)
+        self._last_allocation_validation = result
+        return result
+
     def set_allocation_plan(
         self, plan: WorkspaceAllocationPlan | None
     ) -> None:
@@ -765,6 +830,7 @@ class ToleranceWorkspaceController:
         self._state = replace(
             self._state, schema_version=new_schema, allocation_plan=plan
         )
+        self._last_allocation_validation = None
 
     def clear_allocation_plan(self) -> None:
         """Clear the authoritative allocation plan (Stage 17E-1).
@@ -785,6 +851,7 @@ class ToleranceWorkspaceController:
         self._last_decision = None
         self._last_sensitivity = None
         self._last_budget = None
+        self._last_allocation_validation = None
 
     def _worst_case_stack(self) -> ToleranceStack:
         return ToleranceStack(

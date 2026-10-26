@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import (
+    AllocationValidationResult,
     StackDirection,
     ToleranceDecisionEvidence,
     ToleranceDecisionResult,
@@ -32,6 +33,7 @@ _NO_RESULT_TEXT = "No result"
 _NO_DECISION_TEXT = "NOT EVALUATED"
 _NO_SENSITIVITY_TEXT = "NOT RUN"
 _NO_BUDGET_TEXT = "NOT RUN"
+_NO_ALLOCATION_VALIDATION_TEXT = "NOT VALIDATED"
 
 
 def _numeric_detail_parts(
@@ -233,6 +235,55 @@ class WorkspaceSession:
     def run_budget(self) -> WorstCaseBudgetResult:
         """Delegate budget execution to the controller."""
         return self.controller.run_budget()
+
+    @property
+    def last_allocation_validation(self) -> AllocationValidationResult | None:
+        """Current allocation validation result; None when not yet run."""
+        return self.controller.last_allocation_validation
+
+    def validate_allocation(self) -> AllocationValidationResult:
+        """Delegate allocation validation to the controller (Stage 17E-2)."""
+        return self.controller.validate_allocation()
+
+    @property
+    def allocation_validation_status_text(self) -> str:
+        """Presentation text for the current allocation validation state."""
+        validation = self.controller.last_allocation_validation
+        if validation is None:
+            return _NO_ALLOCATION_VALIDATION_TEXT
+        return validation.status.value.upper()
+
+    @property
+    def allocation_validation_summary_text(self) -> str:
+        """Compact summary: Budget / Allocated / Remaining / Utilization."""
+        validation = self.controller.last_allocation_validation
+        if validation is None:
+            return ""
+        complete = "complete" if validation.is_complete else "incomplete"
+        return (
+            f"Budget: {validation.allowed_budget:.6g}  "
+            f"Allocated: {validation.allocated_total:.6g}  "
+            f"Remaining: {validation.remaining_unallocated:.6g}  "
+            f"Utilization: {validation.utilization_percentage:.1f}%  "
+            f"({complete})"
+        )
+
+    def allocation_validation_rows(self) -> list[dict[str, object]]:
+        """Presentation rows for the allocation validation table; empty when not run."""
+        validation = self.controller.last_allocation_validation
+        if validation is None:
+            return []
+        rows: list[dict[str, object]] = []
+        for rank, cr in enumerate(validation.contributor_results, start=1):
+            rows.append({
+                "rank": rank,
+                "contributor_id": cr.contributor_id,
+                "allocated_span": cr.allocated_span,
+                "current_span": cr.current_span,
+                "delta_from_current": cr.delta_from_current,
+                "fraction_pct": 100.0 * cr.fraction_of_allowed_budget,
+            })
+        return rows
 
     def save_project(
         self, path: str | Path, *, project_name: str | None = None

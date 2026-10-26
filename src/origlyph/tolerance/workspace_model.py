@@ -23,6 +23,8 @@ from .workspace_controller import (
     AnalysisMode,
     InvalidToleranceWorkspaceError,
     ToleranceWorkspaceController,
+    WorkspaceAllocationEntry,
+    WorkspaceAllocationPlan,
     WorkspaceAnalysisResult,
     WorkspaceSpecification,
 )
@@ -81,6 +83,24 @@ def _parse_opt_positive_str(value: str, label: str) -> float | None:
     return numeric
 
 
+def _parse_non_negative_str(value: str, label: str) -> float:
+    """Return a validated non-negative finite float; blank is an error."""
+    stripped = value.strip()
+    if not stripped:
+        raise InvalidToleranceWorkspaceError(
+            f"{label}: allocated span is required"
+        )
+    try:
+        numeric = float(stripped)
+    except ValueError as exc:
+        raise InvalidToleranceWorkspaceError(f"{label}: must be numeric") from exc
+    if not math.isfinite(numeric):
+        raise InvalidToleranceWorkspaceError(f"{label}: must be finite")
+    if numeric < 0.0:
+        raise InvalidToleranceWorkspaceError(f"{label}: must be non-negative")
+    return numeric
+
+
 class WorkspaceSession:
     """Headless view seam owning header sync and result presentation.
 
@@ -98,6 +118,9 @@ class WorkspaceSession:
         self.allowed_sigma: str = _spec_field_str(
             controller.specification, "allowed_combined_sigma"
         )
+        self.allocation_budget: str = ""
+        self._allocation_spans: dict[str, str] = {}
+        self.load_allocation_plan_fields()
 
     @property
     def result_text(self) -> str:
@@ -236,6 +259,71 @@ class WorkspaceSession:
         """Delegate budget execution to the controller."""
         return self.controller.run_budget()
 
+    def load_allocation_plan_fields(self) -> None:
+        """Populate transient allocation editor fields from the authoritative plan."""
+        plan = self.controller.allocation_plan
+        if plan is None:
+            self.allocation_budget = ""
+            self._allocation_spans = {}
+        else:
+            self.allocation_budget = repr(plan.allowed_budget)
+            self._allocation_spans = {
+                e.contributor_id: repr(e.allocated_span) for e in plan.entries
+            }
+
+    def pending_span(self, contributor_id: str) -> str:
+        """Return the pending allocated span string for a contributor."""
+        return self._allocation_spans.get(contributor_id, "")
+
+    def set_pending_span(self, contributor_id: str, span_str: str) -> None:
+        """Set the pending allocated span string for a contributor."""
+        self._allocation_spans[contributor_id] = span_str
+
+    def sync_allocation_plan(self) -> None:
+        """Parse editor fields and apply the allocation plan to the controller.
+
+        Fail-closed: raises InvalidToleranceWorkspaceError on blank or invalid
+        budget, or missing/invalid span for any current contributor.
+        Does not call validate_allocation.
+        """
+        budget = _parse_opt_positive_str(self.allocation_budget, "allocation budget")
+        if budget is None:
+            raise InvalidToleranceWorkspaceError(
+                "allocation budget is required"
+            )
+        entries = []
+        for c in self.controller.contributors:
+            span_str = self._allocation_spans.get(c.identifier, "")
+            span = _parse_non_negative_str(span_str, c.identifier)
+            entries.append(
+                WorkspaceAllocationEntry(
+                    contributor_id=c.identifier, allocated_span=span
+                )
+            )
+        plan = WorkspaceAllocationPlan(
+            allowed_budget=budget,
+            entries=tuple(entries),
+        )
+        self.controller.set_allocation_plan(plan)
+
+    def clear_allocation_plan(self) -> None:
+        """Clear the allocation plan and reset transient editor fields."""
+        self.controller.clear_allocation_plan()
+        self.allocation_budget = ""
+        self._allocation_spans = {}
+
+    def allocation_editor_rows(self) -> list[dict[str, object]]:
+        """Rows for the allocation plan editor table; one per current contributor."""
+        rows: list[dict[str, object]] = []
+        for c in self.controller.contributors:
+            rows.append({
+                "contributor_id": c.identifier,
+                "contributor_name": c.name,
+                "current_span": c.tolerance * 2.0,
+                "allocated_span_str": self._allocation_spans.get(c.identifier, ""),
+            })
+        return rows
+
     @property
     def last_allocation_validation(self) -> AllocationValidationResult | None:
         """Current allocation validation result; None when not yet run."""
@@ -340,8 +428,23 @@ class ToleranceWorkspaceView:
         self._budget_status = tk.StringVar(value=_NO_BUDGET_TEXT)
         self._budget_summary = tk.StringVar(value="")
         self._budget_tree: Any = None
+        self._allocation_budget_var = tk.StringVar(
+            value=self._session.allocation_budget
+        )
+        self._alloc_span_entry_var = tk.StringVar()
+        self._alloc_selected_id: str | None = None
+        self._allocation_validation_status = tk.StringVar(
+            value=self._session.allocation_validation_status_text
+        )
+        self._allocation_validation_summary = tk.StringVar(
+            value=self._session.allocation_validation_summary_text
+        )
+        self._allocation_plan_tree: Any = None
+        self._allocation_result_tree: Any = None
         self._build()
         self._refresh_rows()
+        self._refresh_allocation_plan()
+        self._refresh_allocation_validation()
 
     @property
     def controller(self) -> ToleranceWorkspaceController:
@@ -541,6 +644,104 @@ class ToleranceWorkspaceView:
             side="left", padx=(8, 0)
         )
 
+        alloc_plan = ttk.Labelframe(main, text="Allocation Plan", padding=8)
+        alloc_plan.grid(row=9, column=0, sticky="ew", pady=(8, 0))
+        alloc_plan.columnconfigure(3, weight=1)
+        ttk.Label(alloc_plan, text="Allocation Budget").grid(
+            row=0, column=0, sticky="w"
+        )
+        alloc_budget_entry = ttk.Entry(
+            alloc_plan, textvariable=self._allocation_budget_var, width=14
+        )
+        alloc_budget_entry.grid(row=0, column=1, sticky="ew", padx=(4, 16))
+        ttk.Label(alloc_plan, text="(required, > 0)").grid(
+            row=0, column=2, sticky="w"
+        )
+        self._allocation_plan_tree = ttk.Treeview(
+            alloc_plan,
+            columns=("contributor", "current_span", "allocated_span"),
+            show="headings",
+            height=4,
+        )
+        _alloc_plan_cols = (
+            ("contributor", "Contributor", 160),
+            ("current_span", "Current Span", 110),
+            ("allocated_span", "Allocated Span", 110),
+        )
+        for key, label, width in _alloc_plan_cols:
+            self._allocation_plan_tree.heading(key, text=label)
+            self._allocation_plan_tree.column(key, width=width, stretch=True)
+        self._allocation_plan_tree.grid(
+            row=1, column=0, columnspan=4, sticky="nsew", pady=(8, 0)
+        )
+        self._allocation_plan_tree.bind(
+            "<<TreeviewSelect>>",
+            lambda _event: self._guard(self._alloc_tree_select),
+        )
+        ttk.Label(alloc_plan, text="Allocated Span for Selected:").grid(
+            row=2, column=0, sticky="w", pady=(6, 0)
+        )
+        span_entry = ttk.Entry(
+            alloc_plan, textvariable=self._alloc_span_entry_var, width=14
+        )
+        span_entry.grid(row=2, column=1, sticky="ew", padx=(4, 16), pady=(6, 0))
+        ttk.Button(
+            alloc_plan, text="Set Span", command=self._set_alloc_span
+        ).grid(row=2, column=2, sticky="ew", pady=(6, 0))
+        alloc_btn_row = ttk.Frame(alloc_plan)
+        alloc_btn_row.grid(
+            row=3, column=0, columnspan=4, sticky="ew", pady=(6, 0)
+        )
+        ttk.Button(
+            alloc_btn_row,
+            text="Apply Allocation Plan",
+            command=self._apply_allocation_plan,
+        ).pack(side="left")
+        ttk.Button(
+            alloc_btn_row,
+            text="Clear Plan",
+            command=self._clear_allocation_plan_action,
+        ).pack(side="left", padx=(8, 0))
+        ttk.Button(
+            alloc_btn_row,
+            text="Validate Allocation",
+            command=self._run_validate_allocation,
+        ).pack(side="left", padx=(8, 0))
+
+        alloc_result = ttk.Labelframe(
+            main, text="Allocation Validation Result", padding=8
+        )
+        alloc_result.grid(row=10, column=0, sticky="ew", pady=(8, 0))
+        alloc_result.columnconfigure(1, weight=1)
+        ttk.Label(alloc_result, text="Status:").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            alloc_result,
+            textvariable=self._allocation_validation_status,
+            font=("", 10, "bold"),
+        ).grid(row=0, column=1, sticky="w")
+        ttk.Label(
+            alloc_result, textvariable=self._allocation_validation_summary
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self._allocation_result_tree = ttk.Treeview(
+            alloc_result,
+            columns=("contributor", "allocated", "current", "delta", "fraction"),
+            show="headings",
+            height=4,
+        )
+        _alloc_result_cols = (
+            ("contributor", "Contributor", 140),
+            ("allocated", "Allocated", 90),
+            ("current", "Current Span", 100),
+            ("delta", "Delta", 80),
+            ("fraction", "% of Budget", 90),
+        )
+        for key, label, width in _alloc_result_cols:
+            self._allocation_result_tree.heading(key, text=label)
+            self._allocation_result_tree.column(key, width=width, stretch=True)
+        self._allocation_result_tree.grid(
+            row=2, column=0, columnspan=2, sticky="nsew", pady=(6, 0)
+        )
+
     def _sync_header(self) -> None:
         """Push header widgets into the controller, keeping the same instance."""
         session = self._session
@@ -568,6 +769,8 @@ class ToleranceWorkspaceView:
         self._refresh_decision()
         self._refresh_sensitivity()
         self._refresh_budget()
+        self._refresh_allocation_plan()
+        self._refresh_allocation_validation()
 
     def _refresh_decision(self) -> None:
         """Keep the Decision labels in step with the controller cache."""
@@ -700,6 +903,10 @@ class ToleranceWorkspaceView:
         )
         self._session.allowed_wc_span = self._allowed_wc_span.get()
         self._session.allowed_sigma = self._allowed_sigma.get()
+        self._session.load_allocation_plan_fields()
+        self._allocation_budget_var.set(self._session.allocation_budget)
+        self._alloc_span_entry_var.set("")
+        self._alloc_selected_id = None
         self._refresh_rows()
         self._refresh_result()
 
@@ -763,6 +970,105 @@ class ToleranceWorkspaceView:
                     f"{row['span']:.6g}",
                     f"{row['pct_consumed']:.1f}%",
                     f"{row['pct_allowed']:.1f}%",
+                ),
+            )
+
+    def _alloc_tree_select(self) -> None:
+        selected = self._allocation_plan_tree.selection()
+        if not selected:
+            self._alloc_selected_id = None
+            return
+        iid = str(selected[0])
+        self._alloc_selected_id = iid
+        self._alloc_span_entry_var.set(self._session.pending_span(iid))
+
+    def _set_alloc_span(self) -> None:
+        self._guard(lambda: self._set_alloc_span_impl())
+
+    def _set_alloc_span_impl(self) -> None:
+        if self._alloc_selected_id is None:
+            raise InvalidToleranceWorkspaceError(
+                "select a contributor to set its allocated span"
+            )
+        self._session.set_pending_span(
+            self._alloc_selected_id, self._alloc_span_entry_var.get()
+        )
+        self._refresh_allocation_plan()
+
+    def _apply_allocation_plan(self) -> None:
+        self._guard(lambda: self._apply_allocation_plan_impl())
+
+    def _apply_allocation_plan_impl(self) -> None:
+        self._session.allocation_budget = self._allocation_budget_var.get()
+        self._session.sync_allocation_plan()
+        self._refresh_allocation_plan()
+        self._refresh_allocation_validation()
+
+    def _clear_allocation_plan_action(self) -> None:
+        self._guard(lambda: self._clear_allocation_plan_impl())
+
+    def _clear_allocation_plan_impl(self) -> None:
+        self._session.clear_allocation_plan()
+        self._allocation_budget_var.set("")
+        self._alloc_span_entry_var.set("")
+        self._alloc_selected_id = None
+        self._refresh_allocation_plan()
+        self._refresh_allocation_validation()
+
+    def _run_validate_allocation(self) -> None:
+        self._guard(lambda: self._run_validate_allocation_impl())
+
+    def _run_validate_allocation_impl(self) -> None:
+        self._session.validate_allocation()
+        self._refresh_allocation_validation()
+
+    def _refresh_allocation_plan(self) -> None:
+        tree = self._allocation_plan_tree
+        if tree is None:
+            return
+        selected = tree.selection()
+        previous_iid = str(selected[0]) if selected else None
+        for row_id in tree.get_children():
+            tree.delete(row_id)
+        for row in self._session.allocation_editor_rows():
+            iid = str(row["contributor_id"])
+            span_str = str(row["allocated_span_str"])
+            tree.insert(
+                "",
+                "end",
+                iid=iid,
+                values=(
+                    str(row["contributor_name"]),
+                    f"{row['current_span']:.6g}",
+                    span_str if span_str else "—",
+                ),
+            )
+        if previous_iid is not None and tree.exists(previous_iid):
+            tree.selection_set(previous_iid)
+            tree.see(previous_iid)
+
+    def _refresh_allocation_validation(self) -> None:
+        self._allocation_validation_status.set(
+            self._session.allocation_validation_status_text
+        )
+        self._allocation_validation_summary.set(
+            self._session.allocation_validation_summary_text
+        )
+        tree = self._allocation_result_tree
+        if tree is None:
+            return
+        for row_id in tree.get_children():
+            tree.delete(row_id)
+        for row in self._session.allocation_validation_rows():
+            tree.insert(
+                "",
+                "end",
+                values=(
+                    str(row["contributor_id"]),
+                    f"{row['allocated_span']:.6g}",
+                    f"{row['current_span']:.6g}",
+                    f"{row['delta_from_current']:.6g}",
+                    f"{row['fraction_pct']:.1f}%",
                 ),
             )
 

@@ -1,0 +1,18 @@
+{
+  "project": "Origlyph AI",
+  "version": "0.4.0a7",
+  "release_line": "v0.4.0-alpha.7",
+  "baseline_commit": "7fc11129ca63d09d0054ceb8afe241ea894ca93a",
+  "launcher": "scripts/run_tolerance_demo.ps1",
+  "launcher_secondary": "scripts/run_tolerance_demo.cmd",
+  "demo_entry_point": "examples/tolerance_workspace_demo.py",
+  "runbook": "docs/demo/customer_demo_runbook.md",
+  "cheat_sheet": "docs/demo/customer_demo_cheat_sheet.md",
+  "golden_baseline_doc": "docs/demo/golden_demo_baseline.md",
+  "readiness_script": "scripts/check_demo_readiness.ps1",
+  "validation_stage": "18C",
+  "validation_result": "PASS",
+  "customer_demo_ready": true,
+  "demo_dataset": "bracket-mounting-assembly",
+  "configuration_fingerprint": "6b95f5e9299d20e5fd48d018c423cc94295decb658953a95b121ad53b56777fb"
+}

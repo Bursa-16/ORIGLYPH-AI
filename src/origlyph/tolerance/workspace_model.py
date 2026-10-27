@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import (
+    AllocationReconciliationResult,
     AllocationValidationResult,
     StackDirection,
     ToleranceDecisionEvidence,
@@ -36,6 +37,7 @@ _NO_DECISION_TEXT = "NOT EVALUATED"
 _NO_SENSITIVITY_TEXT = "NOT RUN"
 _NO_BUDGET_TEXT = "NOT RUN"
 _NO_ALLOCATION_VALIDATION_TEXT = "NOT VALIDATED"
+_NO_RECONCILIATION_TEXT = "NOT RUN"
 _MODE_DISPLAY_NAMES: dict[str, str] = {
     "worst_case": "Worst Case",
     "rss_statistical": "RSS Statistical",
@@ -350,6 +352,54 @@ class WorkspaceSession:
         return self.controller.validate_allocation()
 
     @property
+    def last_reconciliation(self) -> AllocationReconciliationResult | None:
+        """Current reconciliation result; None when not yet run."""
+        return self.controller.last_reconciliation
+
+    def run_reconciliation(self) -> AllocationReconciliationResult:
+        """Delegate reconciliation to the controller (Stage 15I)."""
+        return self.controller.run_reconciliation()
+
+    @property
+    def reconciliation_status_text(self) -> str:
+        """Presentation text for the current reconciliation state."""
+        rec = self.controller.last_reconciliation
+        if rec is None:
+            return _NO_RECONCILIATION_TEXT
+        return rec.reconciliation_status.value.upper()
+
+    @property
+    def reconciliation_summary_text(self) -> str:
+        """Compact summary: Budget / Allocated / Actual / Margin."""
+        rec = self.controller.last_reconciliation
+        if rec is None:
+            return ""
+        return (
+            f"Budget: {rec.allowed_budget:.6g}  "
+            f"Allocated: {rec.allocated_total:.6g}  "
+            f"Actual: {rec.actual_total_span:.6g}  "
+            f"Margin: {rec.total_allocation_margin:.6g}"
+        )
+
+    def reconciliation_rows(self) -> list[dict[str, object]]:
+        """Presentation rows for the reconciliation table; empty when not run."""
+        rec = self.controller.last_reconciliation
+        if rec is None:
+            return []
+        rows: list[dict[str, object]] = []
+        for rank, cc in enumerate(rec.contributor_compliances, start=1):
+            rows.append({
+                "rank": rank,
+                "contributor_id": cc.contributor_id,
+                "allocated_span": cc.allocated_span,
+                "actual_span": cc.actual_span,
+                "margin": cc.margin,
+                "utilization_pct": cc.utilization_percentage,
+                "status": cc.status.value,
+            })
+        return rows
+
+    @property
     def allocation_validation_status_text(self) -> str:
         """Presentation text for the current allocation validation state."""
         validation = self.controller.last_allocation_validation
@@ -459,10 +509,18 @@ class ToleranceWorkspaceView:
         )
         self._allocation_plan_tree: Any = None
         self._allocation_result_tree: Any = None
+        self._reconciliation_status = tk.StringVar(
+            value=self._session.reconciliation_status_text
+        )
+        self._reconciliation_summary = tk.StringVar(
+            value=self._session.reconciliation_summary_text
+        )
+        self._reconciliation_tree: Any = None
         self._build()
         self._refresh_rows()
         self._refresh_allocation_plan()
         self._refresh_allocation_validation()
+        self._refresh_reconciliation()
 
     @property
     def controller(self) -> ToleranceWorkspaceController:
@@ -674,8 +732,44 @@ class ToleranceWorkspaceView:
             self._budget_tree.column(key, width=width, stretch=True)
         self._budget_tree.pack(side="top", fill="x", pady=(6, 0))
 
+        recon_frame = ttk.Labelframe(main, text="Reconciliation", padding=8)
+        recon_frame.grid(row=10, column=0, sticky="ew", pady=(8, 0))
+        recon_frame.columnconfigure(1, weight=1)
+        ttk.Button(
+            recon_frame, text="Run Reconciliation", command=self._run_reconciliation
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Label(
+            recon_frame,
+            textvariable=self._reconciliation_status,
+            font=("", 10, "bold"),
+        ).grid(row=0, column=1, sticky="w")
+        ttk.Label(
+            recon_frame, textvariable=self._reconciliation_summary
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self._reconciliation_tree = ttk.Treeview(
+            recon_frame,
+            columns=("contributor", "allocated", "actual", "margin", "utilization",
+                     "status"),
+            show="headings",
+            height=4,
+        )
+        _recon_cols = (
+            ("contributor", "Contributor", 140),
+            ("allocated", "Allocated", 90),
+            ("actual", "Actual Span", 90),
+            ("margin", "Margin", 80),
+            ("utilization", "Utiliz. %", 80),
+            ("status", "Status", 110),
+        )
+        for key, label, width in _recon_cols:
+            self._reconciliation_tree.heading(key, text=label)
+            self._reconciliation_tree.column(key, width=width, stretch=True)
+        self._reconciliation_tree.grid(
+            row=2, column=0, columnspan=2, sticky="nsew", pady=(6, 0)
+        )
+
         storage = ttk.Labelframe(main, text="Project File", padding=8)
-        storage.grid(row=10, column=0, sticky="ew", pady=(8, 0))
+        storage.grid(row=11, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(storage, text="Open Project", command=self._open).pack(side="left")
         ttk.Button(storage, text="Save Project", command=self._save).pack(
             side="left", padx=(8, 0)
@@ -808,6 +902,7 @@ class ToleranceWorkspaceView:
         self._refresh_budget()
         self._refresh_allocation_plan()
         self._refresh_allocation_validation()
+        self._refresh_reconciliation()
 
     def _refresh_decision(self) -> None:
         """Keep the Decision labels in step with the controller cache."""
@@ -1106,6 +1201,38 @@ class ToleranceWorkspaceView:
                     f"{row['current_span']:.6g}",
                     f"{row['delta_from_current']:.6g}",
                     f"{row['fraction_pct']:.1f}%",
+                ),
+            )
+
+    def _run_reconciliation(self) -> None:
+        self._guard(lambda: self._run_reconciliation_impl())
+
+    def _run_reconciliation_impl(self) -> None:
+        self._session.run_reconciliation()
+        self._refresh_reconciliation()
+
+    def _refresh_reconciliation(self) -> None:
+        """Keep the Reconciliation panel in step with the controller cache."""
+        self._reconciliation_status.set(self._session.reconciliation_status_text)
+        self._reconciliation_summary.set(self._session.reconciliation_summary_text)
+        tree = self._reconciliation_tree
+        if tree is None:
+            return
+        for row_id in tree.get_children():
+            tree.delete(row_id)
+        for row in self._session.reconciliation_rows():
+            util = row["utilization_pct"]
+            util_str = f"{util:.1f}%" if util is not None else "—"
+            tree.insert(
+                "",
+                "end",
+                values=(
+                    str(row["contributor_id"]),
+                    f"{row['allocated_span']:.6g}",
+                    f"{row['actual_span']:.6g}",
+                    f"{row['margin']:.6g}",
+                    util_str,
+                    str(row["status"]),
                 ),
             )
 

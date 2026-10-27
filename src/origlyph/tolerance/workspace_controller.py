@@ -16,6 +16,7 @@ from .decision import evaluate_tolerance_decision
 from .exceptions import OriglyphToleranceError
 from .models import (
     AllocationPlan,
+    AllocationReconciliationResult,
     AllocationValidationResult,
     StackDirection,
     StatisticalContribution,
@@ -28,6 +29,7 @@ from .models import (
     WorstCaseBudgetResult,
     WorstCaseResult,
 )
+from .reconciliation import reconcile_allocation as _reconcile_allocation
 from .sensitivity import (
     StatisticalSensitivityResult,
     WorstCaseSensitivityResult,
@@ -379,6 +381,7 @@ class ToleranceWorkspaceController:
         ) = None
         self._last_budget: WorstCaseBudgetResult | None = None
         self._last_allocation_validation: AllocationValidationResult | None = None
+        self._last_reconciliation: AllocationReconciliationResult | None = None
 
     @property
     def state(self) -> WorkspaceState:
@@ -418,6 +421,10 @@ class ToleranceWorkspaceController:
     def last_allocation_validation(self) -> AllocationValidationResult | None:
         return self._last_allocation_validation
 
+    @property
+    def last_reconciliation(self) -> AllocationReconciliationResult | None:
+        return self._last_reconciliation
+
     @classmethod
     def empty(
         cls, *, chain_name: str, analysis_mode: AnalysisMode | str
@@ -439,6 +446,7 @@ class ToleranceWorkspaceController:
         instance._last_sensitivity = None
         instance._last_budget = None
         instance._last_allocation_validation = None
+        instance._last_reconciliation = None
         return instance
 
     @classmethod
@@ -799,6 +807,57 @@ class ToleranceWorkspaceController:
         self._last_allocation_validation = result
         return result
 
+    def run_reconciliation(self) -> AllocationReconciliationResult:
+        """Reconcile the allocation plan against actual contributor spans (Stage 15I).
+
+        Adapts the workspace v3 ``allocation_plan`` to the Stage 15 engine types,
+        delegates to :func:`~origlyph.tolerance.reconciliation.reconcile_allocation`,
+        and caches the result as derived runtime evidence.
+
+        Fail-closed:
+
+        - Raises :class:`InvalidToleranceWorkspaceError` when ``allocation_plan``
+          is absent.
+        - Raises :class:`InvalidToleranceWorkspaceError` when no contributors
+          are defined.
+        - Raises :class:`InvalidToleranceWorkspaceError` when any allocation
+          entry references a contributor not present in the workspace.
+        - Propagates :class:`~origlyph.tolerance.InvalidAllocationError` from
+          Stage 15 on completeness or validity failure.
+
+        Does not mutate the allocation plan.
+        Does not perform auto-allocation or optimization.
+        """
+        plan = self._state.allocation_plan
+        if plan is None:
+            raise InvalidToleranceWorkspaceError(
+                "allocation_plan is required to run reconciliation"
+            )
+        if not self.contributors:
+            raise InvalidToleranceWorkspaceError(
+                "workspace requires at least one contributor for reconciliation"
+            )
+        contributor_ids = {c.identifier for c in self.contributors}
+        for entry in plan.entries:
+            if entry.contributor_id not in contributor_ids:
+                raise InvalidToleranceWorkspaceError(
+                    f"allocation entry references unknown contributor "
+                    f"{entry.contributor_id!r}"
+                )
+        stage15_plan = AllocationPlan(
+            allowed_budget=plan.allowed_budget,
+            allocations=tuple(
+                ToleranceAllocation(
+                    contributor_id=e.contributor_id,
+                    allocated_span=e.allocated_span,
+                )
+                for e in plan.entries
+            ),
+        )
+        result = _reconcile_allocation(self._worst_case_stack(), stage15_plan)
+        self._last_reconciliation = result
+        return result
+
     def set_allocation_plan(
         self, plan: WorkspaceAllocationPlan | None
     ) -> None:
@@ -831,6 +890,7 @@ class ToleranceWorkspaceController:
             self._state, schema_version=new_schema, allocation_plan=plan
         )
         self._last_allocation_validation = None
+        self._last_reconciliation = None
 
     def clear_allocation_plan(self) -> None:
         """Clear the authoritative allocation plan (Stage 17E-1).
@@ -852,6 +912,7 @@ class ToleranceWorkspaceController:
         self._last_sensitivity = None
         self._last_budget = None
         self._last_allocation_validation = None
+        self._last_reconciliation = None
 
     def _worst_case_stack(self) -> ToleranceStack:
         return ToleranceStack(

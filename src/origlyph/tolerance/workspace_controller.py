@@ -19,6 +19,9 @@ from .models import (
     AllocationReconciliationResult,
     AllocationValidationResult,
     StackDirection,
+    StatisticalAllocation,
+    StatisticalAllocationPlan,
+    StatisticalAllocationReconciliationResult,
     StatisticalContribution,
     StatisticalResult,
     StatisticalStack,
@@ -37,12 +40,16 @@ from .sensitivity import (
     worst_case_sensitivity,
 )
 from .statistical import statistical
+from .statistical_reconciliation import (
+    reconcile_statistical_allocation as _reconcile_statistical_allocation,
+)
 from .worst_case import worst_case
 
 __all__ = [
     "TOLERANCE_WORKSPACE_SCHEMA_VERSION",
     "TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2",
     "TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3",
+    "TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4",
     "AnalysisMode",
     "InvalidToleranceWorkspaceError",
     "WorkspaceAllocationEntry",
@@ -51,6 +58,8 @@ __all__ = [
     "WorkspaceContributor",
     "WorkspaceSpecification",
     "WorkspaceState",
+    "WorkspaceStatisticalAllocationEntry",
+    "WorkspaceStatisticalAllocationPlan",
     "ToleranceWorkspaceController",
     "workspace_configuration_fingerprint",
     "workspace_result_identities",
@@ -62,6 +71,7 @@ __all__ = [
 TOLERANCE_WORKSPACE_SCHEMA_VERSION = "origlyph.tolerance.workspace.v1"
 TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2 = "origlyph.tolerance.workspace.v2"
 TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3 = "origlyph.tolerance.workspace.v3"
+TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4 = "origlyph.tolerance.workspace.v4"
 _SUPPORTED_TOLERANCE_MODEL = "symmetric"
 _DEFAULT_SIGMA_MULTIPLIER = 1.0
 
@@ -203,6 +213,111 @@ class WorkspaceAllocationPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkspaceStatisticalAllocationEntry:
+    """One per-contributor entry in a workspace statistical allocation plan (Stage 19D).
+
+    Carries the user-supplied allocated sigma budget for a single contributor.
+    ``contributor_id`` must match a :class:`WorkspaceContributor` identifier in
+    the same workspace.
+
+    This is a workspace-layer type.  It converts to
+    :class:`~origlyph.tolerance.StatisticalAllocation` immediately before calling
+    the Stage 15J reconciliation engine.  Engine types do not appear in workspace
+    persistence.
+    """
+
+    contributor_id: str
+    allocated_sigma: float
+
+    def __post_init__(self) -> None:
+        _require_text(self.contributor_id, field="contributor_id")
+        sigma = _require_finite(self.allocated_sigma, field="allocated_sigma")
+        if sigma < 0.0:
+            raise InvalidToleranceWorkspaceError(
+                "allocated_sigma must be non-negative"
+            )
+        object.__setattr__(self, "allocated_sigma", sigma)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "contributor_id": self.contributor_id,
+            "allocated_sigma": self.allocated_sigma,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceStatisticalAllocationPlan:
+    """Authoritative statistical allocation plan for the workspace (Stage 19D).
+
+    Carries the sigma multiplier, per-contributor allocated sigma budgets, and
+    an optional total combined-sigma budget.  This is the authoritative
+    engineering input for statistical reconciliation.  The values are always
+    user-supplied; no optimization is performed.
+
+    ``sigma_multiplier`` is the standard-deviation multiplier used for both
+    the allocation-side variance computation and the authoritative statistical
+    engine call inside reconciliation.  Common values are 1, 2, or 3.
+
+    ``allowed_combined_sigma`` is optional.  When ``None``, the allocation-side
+    combined sigma is the RSS of per-contributor allocated sigmas.
+
+    Identity: any change to ``sigma_multiplier``, ``allowed_combined_sigma``,
+    ``entries`` membership, or any ``allocated_sigma`` rotates the workspace
+    configuration fingerprint and therefore the project identity.
+
+    This is a workspace-layer type.  It converts to
+    :class:`~origlyph.tolerance.StatisticalAllocationPlan` immediately before
+    calling the Stage 15J engine.  Engine types do not appear in workspace
+    persistence.
+
+    V1 reconciliation: correlations are not modeled; the engine call uses
+    ``correlations=None`` (explicit independence).
+    """
+
+    sigma_multiplier: float
+    entries: tuple[WorkspaceStatisticalAllocationEntry, ...]
+    allowed_combined_sigma: float | None = None
+
+    def __post_init__(self) -> None:
+        multiplier = _require_finite(self.sigma_multiplier, field="sigma_multiplier")
+        if multiplier <= 0.0:
+            raise InvalidToleranceWorkspaceError(
+                "sigma_multiplier must be strictly positive"
+            )
+        object.__setattr__(self, "sigma_multiplier", multiplier)
+        if not isinstance(self.entries, tuple):
+            raise InvalidToleranceWorkspaceError("entries must be a tuple")
+        seen_ids: set[str] = set()
+        for index, entry in enumerate(self.entries):
+            if not isinstance(entry, WorkspaceStatisticalAllocationEntry):
+                raise InvalidToleranceWorkspaceError(
+                    f"entries[{index}] must be WorkspaceStatisticalAllocationEntry"
+                )
+            if entry.contributor_id in seen_ids:
+                raise InvalidToleranceWorkspaceError(
+                    f"duplicate contributor_id in statistical allocation entries: "
+                    f"{entry.contributor_id!r}"
+                )
+            seen_ids.add(entry.contributor_id)
+        if self.allowed_combined_sigma is not None:
+            sigma = _require_finite(
+                self.allowed_combined_sigma, field="allowed_combined_sigma"
+            )
+            if sigma <= 0.0:
+                raise InvalidToleranceWorkspaceError(
+                    "allowed_combined_sigma must be strictly positive"
+                )
+            object.__setattr__(self, "allowed_combined_sigma", sigma)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "sigma_multiplier": self.sigma_multiplier,
+            "entries": [e.as_dict() for e in self.entries],
+            "allowed_combined_sigma": self.allowed_combined_sigma,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class WorkspaceContributor:
     """One validated contributor row in the tolerance workspace."""
 
@@ -240,6 +355,55 @@ class WorkspaceContributor:
         }
 
 
+def _validate_workspace_state_schema(
+    schema_version: str,
+    *,
+    specification: object,
+    allocation_plan: object,
+    statistical_allocation_plan: object,
+) -> None:
+    _v1 = TOLERANCE_WORKSPACE_SCHEMA_VERSION
+    _v2 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2
+    _v3 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3
+    _v4 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4
+    if schema_version not in (_v1, _v2, _v3, _v4):
+        raise InvalidToleranceWorkspaceError(
+            f"unsupported workspace schema {schema_version!r}"
+        )
+    if schema_version == _v1 and specification is not None:
+        raise InvalidToleranceWorkspaceError(
+            "workspace v1 does not support specification; use v2"
+        )
+    if schema_version in (_v1, _v2) and allocation_plan is not None:
+        raise InvalidToleranceWorkspaceError(
+            f"workspace {schema_version} does not support allocation_plan; use v3"
+        )
+    if schema_version in (_v1, _v2, _v3) and statistical_allocation_plan is not None:
+        raise InvalidToleranceWorkspaceError(
+            f"workspace {schema_version} does not support "
+            "statistical_allocation_plan; use v4"
+        )
+    if specification is not None and not isinstance(
+        specification, WorkspaceSpecification
+    ):
+        raise InvalidToleranceWorkspaceError(
+            "specification must be WorkspaceSpecification or None"
+        )
+    if allocation_plan is not None and not isinstance(
+        allocation_plan, WorkspaceAllocationPlan
+    ):
+        raise InvalidToleranceWorkspaceError(
+            "allocation_plan must be WorkspaceAllocationPlan or None"
+        )
+    if statistical_allocation_plan is not None and not isinstance(
+        statistical_allocation_plan, WorkspaceStatisticalAllocationPlan
+    ):
+        raise InvalidToleranceWorkspaceError(
+            "statistical_allocation_plan must be "
+            "WorkspaceStatisticalAllocationPlan or None"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class WorkspaceState:
     """Immutable authoritative workspace configuration.
@@ -250,10 +414,13 @@ class WorkspaceState:
     * :data:`TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2` (v2, optional specification,
       no allocation plan)
     * :data:`TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3` (v3, optional specification,
-      optional allocation plan)
+      optional worst-case allocation plan)
+    * :data:`TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4` (v4, optional specification,
+      optional worst-case allocation plan, optional statistical allocation plan)
 
     V1 states always have ``specification=None`` and ``allocation_plan=None``.
     V2 states always have ``allocation_plan=None``.
+    V1/V2/V3 states always have ``statistical_allocation_plan=None``.
     """
 
     schema_version: str
@@ -262,36 +429,15 @@ class WorkspaceState:
     contributors: tuple[WorkspaceContributor, ...]
     specification: WorkspaceSpecification | None = None
     allocation_plan: WorkspaceAllocationPlan | None = None
+    statistical_allocation_plan: WorkspaceStatisticalAllocationPlan | None = None
 
     def __post_init__(self) -> None:
-        _v1 = TOLERANCE_WORKSPACE_SCHEMA_VERSION
-        _v2 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2
-        _v3 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3
-        if self.schema_version not in (_v1, _v2, _v3):
-            raise InvalidToleranceWorkspaceError(
-                f"unsupported workspace schema {self.schema_version!r}"
-            )
-        if self.schema_version == _v1 and self.specification is not None:
-            raise InvalidToleranceWorkspaceError(
-                "workspace v1 does not support specification; use v2"
-            )
-        if self.schema_version in (_v1, _v2) and self.allocation_plan is not None:
-            raise InvalidToleranceWorkspaceError(
-                f"workspace {self.schema_version} does not support allocation_plan; "
-                "use v3"
-            )
-        if self.specification is not None and not isinstance(
-            self.specification, WorkspaceSpecification
-        ):
-            raise InvalidToleranceWorkspaceError(
-                "specification must be WorkspaceSpecification or None"
-            )
-        if self.allocation_plan is not None and not isinstance(
-            self.allocation_plan, WorkspaceAllocationPlan
-        ):
-            raise InvalidToleranceWorkspaceError(
-                "allocation_plan must be WorkspaceAllocationPlan or None"
-            )
+        _validate_workspace_state_schema(
+            self.schema_version,
+            specification=self.specification,
+            allocation_plan=self.allocation_plan,
+            statistical_allocation_plan=self.statistical_allocation_plan,
+        )
         _require_text(self.chain_name, field="chain_name")
         object.__setattr__(
             self, "analysis_mode", _coerce_analysis_mode(self.analysis_mode)
@@ -319,18 +465,26 @@ class WorkspaceState:
         }
         _v2 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2
         _v3 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3
-        if self.schema_version in (_v2, _v3):
+        _v4 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4
+        if self.schema_version in (_v2, _v3, _v4):
             spec_dict: object = (
                 self.specification.as_dict() if self.specification is not None else None
             )
             base["specification"] = spec_dict
-        if self.schema_version == _v3:
+        if self.schema_version in (_v3, _v4):
             plan_dict: object = (
                 self.allocation_plan.as_dict()
                 if self.allocation_plan is not None
                 else None
             )
             base["allocation_plan"] = plan_dict
+        if self.schema_version == _v4:
+            stat_plan_dict: object = (
+                self.statistical_allocation_plan.as_dict()
+                if self.statistical_allocation_plan is not None
+                else None
+            )
+            base["statistical_allocation_plan"] = stat_plan_dict
         return base
 
 
@@ -382,6 +536,9 @@ class ToleranceWorkspaceController:
         self._last_budget: WorstCaseBudgetResult | None = None
         self._last_allocation_validation: AllocationValidationResult | None = None
         self._last_reconciliation: AllocationReconciliationResult | None = None
+        self._last_statistical_reconciliation: (
+            StatisticalAllocationReconciliationResult | None
+        ) = None
 
     @property
     def state(self) -> WorkspaceState:
@@ -425,6 +582,16 @@ class ToleranceWorkspaceController:
     def last_reconciliation(self) -> AllocationReconciliationResult | None:
         return self._last_reconciliation
 
+    @property
+    def last_statistical_reconciliation(
+        self,
+    ) -> StatisticalAllocationReconciliationResult | None:
+        return self._last_statistical_reconciliation
+
+    @property
+    def statistical_allocation_plan(self) -> WorkspaceStatisticalAllocationPlan | None:
+        return self._state.statistical_allocation_plan
+
     @classmethod
     def empty(
         cls, *, chain_name: str, analysis_mode: AnalysisMode | str
@@ -447,6 +614,7 @@ class ToleranceWorkspaceController:
         instance._last_budget = None
         instance._last_allocation_validation = None
         instance._last_reconciliation = None
+        instance._last_statistical_reconciliation = None
         return instance
 
     @classmethod
@@ -517,12 +685,13 @@ class ToleranceWorkspaceController:
             return
         _v2 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2
         _v3 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3
+        _v4 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4
         current = self._state.schema_version
         if specification is not None:
-            # v3 takes precedence: a v3 workspace already carries allocation_plan
-            # and cannot be downgraded to v2.
-            new_schema = _v3 if current == _v3 else _v2
-        elif current in (_v2, _v3):
+            # Preserve v3/v4 if already there; they carry allocation plan or
+            # statistical allocation plan and cannot be downgraded to v2.
+            new_schema = current if current in (_v3, _v4) else _v2
+        elif current in (_v2, _v3, _v4):
             new_schema = current
         else:
             # v1 → clearing already-None spec: genuine no-op (guarded above).
@@ -879,10 +1048,12 @@ class ToleranceWorkspaceController:
             return
         current_schema = self._state.schema_version
         _v3 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3
+        _v4 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4
         if plan is not None:
-            new_schema = _v3
-        elif current_schema == _v3:
-            new_schema = _v3
+            # Preserve v4 if already there; it carries statistical_allocation_plan.
+            new_schema = _v4 if current_schema == _v4 else _v3
+        elif current_schema in (_v3, _v4):
+            new_schema = current_schema
         else:
             # v1 or v2, clearing already-None plan: guarded above (no-op).
             return  # pragma: no cover
@@ -903,6 +1074,112 @@ class ToleranceWorkspaceController:
     def allocation_plan(self) -> WorkspaceAllocationPlan | None:
         return self._state.allocation_plan
 
+    def set_statistical_allocation_plan(
+        self, plan: WorkspaceStatisticalAllocationPlan | None
+    ) -> None:
+        """Set or clear the authoritative statistical allocation plan (Stage 19D).
+
+        A change upgrades the workspace schema to v4 and records the new plan
+        as authoritative engineering state.  Setting the same plan is a no-op.
+        Clearing (``plan=None``) on a v4 workspace keeps v4 — no downgrade occurs,
+        consistent with the v3 / allocation_plan precedent.
+
+        This method carries the plan into workspace state only.  It does not
+        run statistical reconciliation; that is ``run_statistical_reconciliation``.
+        """
+        if plan is not None and not isinstance(
+            plan, WorkspaceStatisticalAllocationPlan
+        ):
+            raise InvalidToleranceWorkspaceError(
+                "statistical_allocation_plan must be "
+                "WorkspaceStatisticalAllocationPlan or None"
+            )
+        if plan == self._state.statistical_allocation_plan:
+            return
+        current_schema = self._state.schema_version
+        _v4 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4
+        if plan is not None:
+            new_schema = _v4
+        elif current_schema == _v4:
+            new_schema = _v4
+        else:
+            # v1/v2/v3, clearing already-None plan: guarded above (no-op).
+            return  # pragma: no cover
+        self._state = replace(
+            self._state,
+            schema_version=new_schema,
+            statistical_allocation_plan=plan,
+        )
+        self._last_statistical_reconciliation = None
+
+    def clear_statistical_allocation_plan(self) -> None:
+        """Clear the authoritative statistical allocation plan (Stage 19D).
+
+        Equivalent to ``set_statistical_allocation_plan(None)``.
+        """
+        self.set_statistical_allocation_plan(None)
+
+    def run_statistical_reconciliation(
+        self,
+    ) -> StatisticalAllocationReconciliationResult:
+        """Reconcile the statistical allocation plan against actual sigma (Stage 15J).
+
+        Adapts the workspace v4 ``statistical_allocation_plan`` to the Stage 15
+        engine types, delegates to
+        :func:`~origlyph.tolerance.reconcile_statistical_allocation`,
+        and caches the result as derived runtime evidence.
+
+        V1 correlation model: ``correlations=None`` (all contributors independent).
+
+        Fail-closed:
+
+        - Raises :class:`InvalidToleranceWorkspaceError` when
+          ``statistical_allocation_plan`` is absent.
+        - Raises :class:`InvalidToleranceWorkspaceError` when no contributors
+          are defined.
+        - Raises :class:`InvalidToleranceWorkspaceError` when any entry references
+          a contributor not present in the workspace.
+        - Propagates :class:`~origlyph.tolerance.InvalidStatisticalAllocationError`
+          from Stage 15 on plan validity failure.
+
+        Does not mutate the statistical allocation plan.
+        Does not perform auto-allocation or optimization.
+        """
+        plan = self._state.statistical_allocation_plan
+        if plan is None:
+            raise InvalidToleranceWorkspaceError(
+                "statistical_allocation_plan is required to run "
+                "statistical reconciliation"
+            )
+        if not self.contributors:
+            raise InvalidToleranceWorkspaceError(
+                "workspace requires at least one contributor for "
+                "statistical reconciliation"
+            )
+        contributor_ids = {c.identifier for c in self.contributors}
+        for entry in plan.entries:
+            if entry.contributor_id not in contributor_ids:
+                raise InvalidToleranceWorkspaceError(
+                    f"statistical allocation entry references unknown contributor "
+                    f"{entry.contributor_id!r}"
+                )
+        stage15_plan = StatisticalAllocationPlan(
+            sigma_multiplier=plan.sigma_multiplier,
+            allocations=tuple(
+                StatisticalAllocation(
+                    contributor_id=e.contributor_id,
+                    allocated_sigma=e.allocated_sigma,
+                )
+                for e in plan.entries
+            ),
+            allowed_combined_sigma=plan.allowed_combined_sigma,
+        )
+        result = _reconcile_statistical_allocation(
+            self._statistical_stack(), stage15_plan, correlations=None
+        )
+        self._last_statistical_reconciliation = result
+        return result
+
     def _replace_contributors(
         self, contributors: tuple[WorkspaceContributor, ...]
     ) -> None:
@@ -913,6 +1190,7 @@ class ToleranceWorkspaceController:
         self._last_budget = None
         self._last_allocation_validation = None
         self._last_reconciliation = None
+        self._last_statistical_reconciliation = None
 
     def _worst_case_stack(self) -> ToleranceStack:
         return ToleranceStack(
@@ -958,6 +1236,8 @@ def workspace_state_from_snapshot(snapshot: object) -> WorkspaceState:
         return _workspace_state_v2_from_dict(data)
     elif raw_schema == TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3:
         return _workspace_state_v3_from_dict(data)
+    elif raw_schema == TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4:
+        return _workspace_state_v4_from_dict(data)
     else:
         raise InvalidToleranceWorkspaceError(
             f"unsupported workspace schema {raw_schema!r}"
@@ -1131,6 +1411,107 @@ def _workspace_allocation_plan_from_dict(data: object) -> WorkspaceAllocationPla
         entries=tuple(
             _workspace_allocation_entry_from_dict(e) for e in raw_entries
         ),
+    )
+
+
+def _workspace_state_v4_from_dict(data: dict[str, Any]) -> WorkspaceState:
+    _require_exact_keys(
+        data,
+        {
+            "schema_version", "chain_name", "analysis_mode",
+            "contributors", "specification", "allocation_plan",
+            "statistical_allocation_plan",
+        },
+        field="workspace snapshot v4",
+    )
+    raw_contributors = data["contributors"]
+    if not isinstance(raw_contributors, list):
+        raise InvalidToleranceWorkspaceError("contributors must be a list")
+    raw_spec = data["specification"]
+    if raw_spec is None:
+        specification = None
+    elif isinstance(raw_spec, dict):
+        specification = _workspace_specification_from_dict(raw_spec)
+    else:
+        raise InvalidToleranceWorkspaceError(
+            "workspace specification must be a dict or null"
+        )
+    raw_plan = data["allocation_plan"]
+    if raw_plan is None:
+        allocation_plan = None
+    elif isinstance(raw_plan, dict):
+        allocation_plan = _workspace_allocation_plan_from_dict(raw_plan)
+    else:
+        raise InvalidToleranceWorkspaceError(
+            "workspace allocation_plan must be a dict or null"
+        )
+    raw_stat_plan = data["statistical_allocation_plan"]
+    if raw_stat_plan is None:
+        statistical_allocation_plan = None
+    elif isinstance(raw_stat_plan, dict):
+        statistical_allocation_plan = _workspace_statistical_allocation_plan_from_dict(
+            raw_stat_plan
+        )
+    else:
+        raise InvalidToleranceWorkspaceError(
+            "workspace statistical_allocation_plan must be a dict or null"
+        )
+    return WorkspaceState(
+        schema_version=data["schema_version"],
+        chain_name=_require_text(data["chain_name"], field="chain_name"),
+        analysis_mode=_coerce_analysis_mode(data["analysis_mode"]),
+        contributors=tuple(
+            _contributor_from_snapshot(item) for item in raw_contributors
+        ),
+        specification=specification,
+        allocation_plan=allocation_plan,
+        statistical_allocation_plan=statistical_allocation_plan,
+    )
+
+
+def _workspace_statistical_allocation_entry_from_dict(
+    data: object,
+) -> WorkspaceStatisticalAllocationEntry:
+    d = _require_dict(data, field="workspace statistical allocation entry")
+    _require_exact_keys(
+        d,
+        {"contributor_id", "allocated_sigma"},
+        field="workspace statistical allocation entry",
+    )
+    return WorkspaceStatisticalAllocationEntry(
+        contributor_id=_require_text(d["contributor_id"], field="contributor_id"),
+        allocated_sigma=_require_finite(d["allocated_sigma"], field="allocated_sigma"),
+    )
+
+
+def _workspace_statistical_allocation_plan_from_dict(
+    data: object,
+) -> WorkspaceStatisticalAllocationPlan:
+    d = _require_dict(data, field="workspace statistical allocation plan")
+    _require_exact_keys(
+        d,
+        {"sigma_multiplier", "entries", "allowed_combined_sigma"},
+        field="workspace statistical allocation plan",
+    )
+    raw_entries = d["entries"]
+    if not isinstance(raw_entries, list):
+        raise InvalidToleranceWorkspaceError(
+            "statistical allocation plan entries must be a list"
+        )
+    raw_acs = d["allowed_combined_sigma"]
+    allowed_combined_sigma = (
+        None
+        if raw_acs is None
+        else _require_finite(raw_acs, field="allowed_combined_sigma")
+    )
+    return WorkspaceStatisticalAllocationPlan(
+        sigma_multiplier=_require_finite(
+            d["sigma_multiplier"], field="sigma_multiplier"
+        ),
+        entries=tuple(
+            _workspace_statistical_allocation_entry_from_dict(e) for e in raw_entries
+        ),
+        allowed_combined_sigma=allowed_combined_sigma,
     )
 
 

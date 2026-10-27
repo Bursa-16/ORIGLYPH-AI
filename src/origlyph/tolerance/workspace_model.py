@@ -11,6 +11,7 @@ from .models import (
     AllocationReconciliationResult,
     AllocationValidationResult,
     StackDirection,
+    StatisticalAllocationReconciliationResult,
     ToleranceDecisionEvidence,
     ToleranceDecisionResult,
     ToleranceDecisionSeverity,
@@ -28,6 +29,8 @@ from .workspace_controller import (
     WorkspaceAllocationPlan,
     WorkspaceAnalysisResult,
     WorkspaceSpecification,
+    WorkspaceStatisticalAllocationEntry,
+    WorkspaceStatisticalAllocationPlan,
 )
 
 __all__ = ["ToleranceWorkspaceView", "WorkspaceSession", "launch_tolerance_workspace"]
@@ -38,6 +41,7 @@ _NO_SENSITIVITY_TEXT = "NOT RUN"
 _NO_BUDGET_TEXT = "NOT RUN"
 _NO_ALLOCATION_VALIDATION_TEXT = "NOT VALIDATED"
 _NO_RECONCILIATION_TEXT = "NOT RUN"
+_NO_STAT_RECONCILIATION_TEXT = "NOT RUN"
 _MODE_DISPLAY_NAMES: dict[str, str] = {
     "worst_case": "Worst Case",
     "rss_statistical": "RSS Statistical",
@@ -115,6 +119,30 @@ def _parse_non_negative_str(value: str, label: str) -> float:
     return numeric
 
 
+def _parse_non_negative_sigma_str(value: str, label: str) -> float:
+    """Return a validated non-negative finite float for sigma; blank is an error."""
+    stripped = value.strip()
+    if not stripped:
+        raise InvalidToleranceWorkspaceError(
+            f'Allocated sigma for "{label}" is required.'
+        )
+    try:
+        numeric = float(stripped)
+    except ValueError as exc:
+        raise InvalidToleranceWorkspaceError(
+            f'Allocated sigma for "{label}": enter a valid number (e.g. 0.05).'
+        ) from exc
+    if not math.isfinite(numeric):
+        raise InvalidToleranceWorkspaceError(
+            f'Allocated sigma for "{label}": must be a finite number.'
+        )
+    if numeric < 0.0:
+        raise InvalidToleranceWorkspaceError(
+            f'Allocated sigma for "{label}": must be zero or greater.'
+        )
+    return numeric
+
+
 class WorkspaceSession:
     """Headless view seam owning header sync and result presentation.
 
@@ -135,6 +163,10 @@ class WorkspaceSession:
         self.allocation_budget: str = ""
         self._allocation_spans: dict[str, str] = {}
         self.load_allocation_plan_fields()
+        self.stat_sigma_multiplier: str = ""
+        self.stat_allocation_budget: str = ""
+        self._stat_allocation_sigmas: dict[str, str] = {}
+        self.load_statistical_allocation_plan_fields()
 
     @property
     def result_text(self) -> str:
@@ -330,6 +362,138 @@ class WorkspaceSession:
         self.allocation_budget = ""
         self._allocation_spans = {}
 
+    def load_statistical_allocation_plan_fields(self) -> None:
+        """Populate transient statistical allocation editor fields from the plan."""
+        plan = self.controller.statistical_allocation_plan
+        if plan is None:
+            self.stat_sigma_multiplier = ""
+            self.stat_allocation_budget = ""
+            self._stat_allocation_sigmas = {}
+        else:
+            self.stat_sigma_multiplier = repr(plan.sigma_multiplier)
+            self.stat_allocation_budget = (
+                repr(plan.allowed_combined_sigma)
+                if plan.allowed_combined_sigma is not None
+                else ""
+            )
+            self._stat_allocation_sigmas = {
+                e.contributor_id: repr(e.allocated_sigma) for e in plan.entries
+            }
+
+    def pending_sigma(self, contributor_id: str) -> str:
+        """Return the pending allocated sigma string for a contributor."""
+        return self._stat_allocation_sigmas.get(contributor_id, "")
+
+    def set_pending_sigma(self, contributor_id: str, sigma_str: str) -> None:
+        """Set the pending allocated sigma string for a contributor."""
+        self._stat_allocation_sigmas[contributor_id] = sigma_str
+
+    def sync_statistical_allocation_plan(self) -> None:
+        """Parse editor fields and apply the statistical allocation plan.
+
+        Fail-closed: raises InvalidToleranceWorkspaceError on blank or invalid
+        sigma multiplier, or missing/invalid sigma for any current contributor.
+        Does not call run_statistical_reconciliation.
+        """
+        multiplier = _parse_opt_positive_str(
+            self.stat_sigma_multiplier, "sigma multiplier"
+        )
+        if multiplier is None:
+            raise InvalidToleranceWorkspaceError(
+                "Sigma multiplier is required. Enter a positive number."
+            )
+        allowed_combined = _parse_opt_positive_str(
+            self.stat_allocation_budget, "allowed combined sigma"
+        )
+        entries = []
+        for c in self.controller.contributors:
+            sigma_str = self._stat_allocation_sigmas.get(c.identifier, "")
+            sigma = _parse_non_negative_sigma_str(sigma_str, c.identifier)
+            entries.append(
+                WorkspaceStatisticalAllocationEntry(
+                    contributor_id=c.identifier, allocated_sigma=sigma
+                )
+            )
+        plan = WorkspaceStatisticalAllocationPlan(
+            sigma_multiplier=multiplier,
+            entries=tuple(entries),
+            allowed_combined_sigma=allowed_combined,
+        )
+        self.controller.set_statistical_allocation_plan(plan)
+
+    def clear_statistical_allocation_plan(self) -> None:
+        """Clear the statistical allocation plan and reset transient editor fields."""
+        self.controller.clear_statistical_allocation_plan()
+        self.stat_sigma_multiplier = ""
+        self.stat_allocation_budget = ""
+        self._stat_allocation_sigmas = {}
+
+    def statistical_allocation_editor_rows(self) -> list[dict[str, object]]:
+        """Rows for the statistical plan editor table; one per current contributor."""
+        rows: list[dict[str, object]] = []
+        for c in self.controller.contributors:
+            rows.append({
+                "contributor_id": c.identifier,
+                "contributor_name": c.name,
+                "current_sigma": c.tolerance,
+                "allocated_sigma_str": self._stat_allocation_sigmas.get(
+                    c.identifier, ""
+                ),
+            })
+        return rows
+
+    @property
+    def last_statistical_reconciliation(
+        self,
+    ) -> StatisticalAllocationReconciliationResult | None:
+        """Current statistical reconciliation result; None when not yet run."""
+        return self.controller.last_statistical_reconciliation
+
+    def run_statistical_reconciliation(
+        self,
+    ) -> StatisticalAllocationReconciliationResult:
+        """Delegate statistical reconciliation to the controller (Stage 15J)."""
+        return self.controller.run_statistical_reconciliation()
+
+    @property
+    def statistical_reconciliation_status_text(self) -> str:
+        """Presentation text for the current statistical reconciliation state."""
+        rec = self.controller.last_statistical_reconciliation
+        if rec is None:
+            return _NO_STAT_RECONCILIATION_TEXT
+        return rec.allocation_plan_status.value.upper()
+
+    @property
+    def statistical_reconciliation_summary_text(self) -> str:
+        """Compact summary: Multiplier / Allocated σ / Actual σ / Margin."""
+        rec = self.controller.last_statistical_reconciliation
+        if rec is None:
+            return ""
+        return (
+            f"k={rec.sigma_multiplier:.6g}  "
+            f"Alloc σ: {rec.allocated_combined_sigma:.6g}  "
+            f"Actual σ: {rec.actual_combined_sigma:.6g}  "
+            f"Margin: {rec.combined_sigma_margin:.6g}"
+        )
+
+    def statistical_reconciliation_rows(self) -> list[dict[str, object]]:
+        """Presentation rows for the statistical reconciliation table."""
+        rec = self.controller.last_statistical_reconciliation
+        if rec is None:
+            return []
+        rows: list[dict[str, object]] = []
+        for rank, cc in enumerate(rec.contributor_compliances, start=1):
+            rows.append({
+                "rank": rank,
+                "contributor_id": cc.contributor_id,
+                "allocated_sigma": cc.allocated_sigma,
+                "actual_sigma": cc.actual_sigma,
+                "margin": cc.sigma_margin,
+                "utilization_pct": cc.utilization_percentage,
+                "status": cc.status.value,
+            })
+        return rows
+
     def allocation_editor_rows(self) -> list[dict[str, object]]:
         """Rows for the allocation plan editor table; one per current contributor."""
         rows: list[dict[str, object]] = []
@@ -516,11 +680,29 @@ class ToleranceWorkspaceView:
             value=self._session.reconciliation_summary_text
         )
         self._reconciliation_tree: Any = None
+        self._stat_alloc_sigma_multiplier_var = tk.StringVar(
+            value=self._session.stat_sigma_multiplier
+        )
+        self._stat_alloc_budget_var = tk.StringVar(
+            value=self._session.stat_allocation_budget
+        )
+        self._stat_alloc_sigma_entry_var = tk.StringVar()
+        self._stat_alloc_selected_id: str | None = None
+        self._stat_reconciliation_status = tk.StringVar(
+            value=self._session.statistical_reconciliation_status_text
+        )
+        self._stat_reconciliation_summary = tk.StringVar(
+            value=self._session.statistical_reconciliation_summary_text
+        )
+        self._stat_alloc_plan_tree: Any = None
+        self._stat_reconciliation_tree: Any = None
         self._build()
         self._refresh_rows()
         self._refresh_allocation_plan()
         self._refresh_allocation_validation()
         self._refresh_reconciliation()
+        self._refresh_statistical_allocation_plan()
+        self._refresh_statistical_reconciliation()
 
     @property
     def controller(self) -> ToleranceWorkspaceController:
@@ -768,8 +950,115 @@ class ToleranceWorkspaceView:
             row=2, column=0, columnspan=2, sticky="nsew", pady=(6, 0)
         )
 
+        stat_alloc_plan = ttk.Labelframe(
+            main, text="Statistical Allocation Plan", padding=8
+        )
+        stat_alloc_plan.grid(row=12, column=0, sticky="ew", pady=(8, 0))
+        stat_alloc_plan.columnconfigure(3, weight=1)
+        ttk.Label(stat_alloc_plan, text="Sigma Multiplier (k)").grid(
+            row=0, column=0, sticky="w"
+        )
+        stat_mult_entry = ttk.Entry(
+            stat_alloc_plan,
+            textvariable=self._stat_alloc_sigma_multiplier_var,
+            width=10,
+        )
+        stat_mult_entry.grid(row=0, column=1, sticky="ew", padx=(4, 16))
+        ttk.Label(stat_alloc_plan, text="Allowed Combined σ (opt.)").grid(
+            row=0, column=2, sticky="w"
+        )
+        stat_budget_entry = ttk.Entry(
+            stat_alloc_plan, textvariable=self._stat_alloc_budget_var, width=14
+        )
+        stat_budget_entry.grid(row=0, column=3, sticky="ew", padx=(4, 0))
+        self._stat_alloc_plan_tree = ttk.Treeview(
+            stat_alloc_plan,
+            columns=("contributor", "current_sigma", "allocated_sigma"),
+            show="headings",
+            height=4,
+        )
+        _stat_alloc_cols = (
+            ("contributor", "Contributor", 160),
+            ("current_sigma", "Current σ", 110),
+            ("allocated_sigma", "Allocated σ", 110),
+        )
+        for key, label, width in _stat_alloc_cols:
+            self._stat_alloc_plan_tree.heading(key, text=label)
+            self._stat_alloc_plan_tree.column(key, width=width, stretch=True)
+        self._stat_alloc_plan_tree.grid(
+            row=1, column=0, columnspan=4, sticky="nsew", pady=(8, 0)
+        )
+        self._stat_alloc_plan_tree.bind(
+            "<<TreeviewSelect>>",
+            lambda _event: self._guard(self._stat_alloc_tree_select),
+        )
+        ttk.Label(stat_alloc_plan, text="Allocated σ for Selected:").grid(
+            row=2, column=0, sticky="w", pady=(6, 0)
+        )
+        stat_sigma_entry = ttk.Entry(
+            stat_alloc_plan, textvariable=self._stat_alloc_sigma_entry_var, width=14
+        )
+        stat_sigma_entry.grid(row=2, column=1, sticky="ew", padx=(4, 16), pady=(6, 0))
+        ttk.Button(
+            stat_alloc_plan, text="Set σ", command=self._set_stat_alloc_sigma
+        ).grid(row=2, column=2, sticky="ew", pady=(6, 0))
+        stat_alloc_btn_row = ttk.Frame(stat_alloc_plan)
+        stat_alloc_btn_row.grid(
+            row=3, column=0, columnspan=4, sticky="ew", pady=(6, 0)
+        )
+        ttk.Button(
+            stat_alloc_btn_row,
+            text="Apply Statistical Plan",
+            command=self._apply_statistical_allocation_plan,
+        ).pack(side="left")
+        ttk.Button(
+            stat_alloc_btn_row,
+            text="Clear Statistical Plan",
+            command=self._clear_statistical_allocation_plan_action,
+        ).pack(side="left", padx=(8, 0))
+        ttk.Button(
+            stat_alloc_btn_row,
+            text="Run Statistical Reconciliation",
+            command=self._run_statistical_reconciliation,
+        ).pack(side="left", padx=(8, 0))
+
+        stat_recon_frame = ttk.Labelframe(
+            main, text="Statistical Reconciliation", padding=8
+        )
+        stat_recon_frame.grid(row=13, column=0, sticky="ew", pady=(8, 0))
+        stat_recon_frame.columnconfigure(1, weight=1)
+        ttk.Label(
+            stat_recon_frame,
+            textvariable=self._stat_reconciliation_status,
+            font=("", 10, "bold"),
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            stat_recon_frame, textvariable=self._stat_reconciliation_summary
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self._stat_reconciliation_tree = ttk.Treeview(
+            stat_recon_frame,
+            columns=("contributor", "alloc_sigma", "actual_sigma", "margin",
+                     "utilization", "status"),
+            show="headings",
+            height=4,
+        )
+        _stat_recon_cols = (
+            ("contributor", "Contributor", 140),
+            ("alloc_sigma", "Alloc σ", 80),
+            ("actual_sigma", "Actual σ", 80),
+            ("margin", "Margin σ", 80),
+            ("utilization", "Utiliz. %", 80),
+            ("status", "Status", 120),
+        )
+        for key, label, width in _stat_recon_cols:
+            self._stat_reconciliation_tree.heading(key, text=label)
+            self._stat_reconciliation_tree.column(key, width=width, stretch=True)
+        self._stat_reconciliation_tree.grid(
+            row=2, column=0, columnspan=2, sticky="nsew", pady=(6, 0)
+        )
+
         storage = ttk.Labelframe(main, text="Project File", padding=8)
-        storage.grid(row=11, column=0, sticky="ew", pady=(8, 0))
+        storage.grid(row=14, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(storage, text="Open Project", command=self._open).pack(side="left")
         ttk.Button(storage, text="Save Project", command=self._save).pack(
             side="left", padx=(8, 0)
@@ -903,6 +1192,8 @@ class ToleranceWorkspaceView:
         self._refresh_allocation_plan()
         self._refresh_allocation_validation()
         self._refresh_reconciliation()
+        self._refresh_statistical_allocation_plan()
+        self._refresh_statistical_reconciliation()
 
     def _refresh_decision(self) -> None:
         """Keep the Decision labels in step with the controller cache."""
@@ -1039,6 +1330,11 @@ class ToleranceWorkspaceView:
         self._allocation_budget_var.set(self._session.allocation_budget)
         self._alloc_span_entry_var.set("")
         self._alloc_selected_id = None
+        self._session.load_statistical_allocation_plan_fields()
+        self._stat_alloc_sigma_multiplier_var.set(self._session.stat_sigma_multiplier)
+        self._stat_alloc_budget_var.set(self._session.stat_allocation_budget)
+        self._stat_alloc_sigma_entry_var.set("")
+        self._stat_alloc_selected_id = None
         self._refresh_rows()
         self._refresh_result()
 
@@ -1230,6 +1526,113 @@ class ToleranceWorkspaceView:
                     str(row["contributor_id"]),
                     f"{row['allocated_span']:.6g}",
                     f"{row['actual_span']:.6g}",
+                    f"{row['margin']:.6g}",
+                    util_str,
+                    str(row["status"]),
+                ),
+            )
+
+    def _stat_alloc_tree_select(self) -> None:
+        selected = self._stat_alloc_plan_tree.selection()
+        if not selected:
+            self._stat_alloc_selected_id = None
+            return
+        iid = str(selected[0])
+        self._stat_alloc_selected_id = iid
+        self._stat_alloc_sigma_entry_var.set(self._session.pending_sigma(iid))
+
+    def _set_stat_alloc_sigma(self) -> None:
+        self._guard(lambda: self._set_stat_alloc_sigma_impl())
+
+    def _set_stat_alloc_sigma_impl(self) -> None:
+        if self._stat_alloc_selected_id is None:
+            raise InvalidToleranceWorkspaceError(
+                "select a contributor to set its allocated sigma"
+            )
+        self._session.set_pending_sigma(
+            self._stat_alloc_selected_id, self._stat_alloc_sigma_entry_var.get()
+        )
+        self._refresh_statistical_allocation_plan()
+
+    def _apply_statistical_allocation_plan(self) -> None:
+        self._guard(lambda: self._apply_statistical_allocation_plan_impl())
+
+    def _apply_statistical_allocation_plan_impl(self) -> None:
+        self._session.stat_sigma_multiplier = (
+            self._stat_alloc_sigma_multiplier_var.get()
+        )
+        self._session.stat_allocation_budget = self._stat_alloc_budget_var.get()
+        self._session.sync_statistical_allocation_plan()
+        self._refresh_statistical_allocation_plan()
+        self._refresh_statistical_reconciliation()
+
+    def _clear_statistical_allocation_plan_action(self) -> None:
+        self._guard(lambda: self._clear_statistical_allocation_plan_impl())
+
+    def _clear_statistical_allocation_plan_impl(self) -> None:
+        self._session.clear_statistical_allocation_plan()
+        self._stat_alloc_sigma_multiplier_var.set("")
+        self._stat_alloc_budget_var.set("")
+        self._stat_alloc_sigma_entry_var.set("")
+        self._stat_alloc_selected_id = None
+        self._refresh_statistical_allocation_plan()
+        self._refresh_statistical_reconciliation()
+
+    def _run_statistical_reconciliation(self) -> None:
+        self._guard(lambda: self._run_statistical_reconciliation_impl())
+
+    def _run_statistical_reconciliation_impl(self) -> None:
+        self._session.run_statistical_reconciliation()
+        self._refresh_statistical_reconciliation()
+
+    def _refresh_statistical_allocation_plan(self) -> None:
+        tree = self._stat_alloc_plan_tree
+        if tree is None:
+            return
+        selected = tree.selection()
+        previous_iid = str(selected[0]) if selected else None
+        for row_id in tree.get_children():
+            tree.delete(row_id)
+        for row in self._session.statistical_allocation_editor_rows():
+            iid = str(row["contributor_id"])
+            sigma_str = str(row["allocated_sigma_str"])
+            tree.insert(
+                "",
+                "end",
+                iid=iid,
+                values=(
+                    str(row["contributor_name"]),
+                    f"{row['current_sigma']:.6g}",
+                    sigma_str if sigma_str else "—",
+                ),
+            )
+        if previous_iid is not None and tree.exists(previous_iid):
+            tree.selection_set(previous_iid)
+            tree.see(previous_iid)
+
+    def _refresh_statistical_reconciliation(self) -> None:
+        """Keep the Statistical Reconciliation panel in step with the cache."""
+        self._stat_reconciliation_status.set(
+            self._session.statistical_reconciliation_status_text
+        )
+        self._stat_reconciliation_summary.set(
+            self._session.statistical_reconciliation_summary_text
+        )
+        tree = self._stat_reconciliation_tree
+        if tree is None:
+            return
+        for row_id in tree.get_children():
+            tree.delete(row_id)
+        for row in self._session.statistical_reconciliation_rows():
+            util = row["utilization_pct"]
+            util_str = f"{util:.1f}%" if util is not None else "—"
+            tree.insert(
+                "",
+                "end",
+                values=(
+                    str(row["contributor_id"]),
+                    f"{row['allocated_sigma']:.6g}",
+                    f"{row['actual_sigma']:.6g}",
                     f"{row['margin']:.6g}",
                     util_str,
                     str(row["status"]),

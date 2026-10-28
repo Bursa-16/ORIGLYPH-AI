@@ -10,6 +10,12 @@ from typing import Any
 from .audit import (
     ToleranceDecisionAuditPackage,
 )
+from .change_impact import (
+    AuditChangeImpactResult,
+)
+from .comparison import (
+    AuditPackageComparisonResult,
+)
 from .evidence import (
     DecisionEvidenceBundle,
     DecisionExplanation,
@@ -56,6 +62,8 @@ _NO_STAT_RECONCILIATION_TEXT = "NOT RUN"
 _NO_EVIDENCE_TEXT = "NOT GENERATED"
 _NO_REPORT_TEXT = "NOT GENERATED"
 _NO_AUDIT_TEXT = "NOT GENERATED"
+_NO_COMPARISON_TEXT = "NOT LOADED"
+_NO_CHANGE_IMPACT_TEXT = "NOT EVALUATED"
 _MODE_DISPLAY_NAMES: dict[str, str] = {
     "worst_case": "Worst Case",
     "rss_statistical": "RSS Statistical",
@@ -715,6 +723,101 @@ class WorkspaceSession:
         )
         return rows
 
+    # --- Audit Comparison + Change Impact (Stage 20E) ---
+
+    @property
+    def comparison_audit_package(self) -> ToleranceDecisionAuditPackage | None:
+        """Currently loaded comparison (candidate) audit package."""
+        return self.controller.comparison_audit_package
+
+    @property
+    def last_audit_comparison(self) -> AuditPackageComparisonResult | None:
+        """Current audit comparison result; None before Compare."""
+        return self.controller.last_audit_comparison
+
+    @property
+    def last_change_impact(self) -> AuditChangeImpactResult | None:
+        """Current change impact result; None before Evaluate Change Impact."""
+        return self.controller.last_change_impact
+
+    def load_comparison_package(self, path: str) -> ToleranceDecisionAuditPackage:
+        """Delegate comparison package load to the controller (Stage 15O)."""
+        return self.controller.load_comparison_audit_package(path)
+
+    def run_audit_comparison(self) -> AuditPackageComparisonResult:
+        """Delegate audit comparison to the controller (Stage 15P)."""
+        return self.controller.run_audit_comparison()
+
+    def run_change_impact(self) -> AuditChangeImpactResult:
+        """Delegate change impact assessment to the controller (Stage 15Q)."""
+        return self.controller.run_change_impact()
+
+    @property
+    def reference_package_id_text(self) -> str:
+        """Short display of the current (reference) audit package ID."""
+        pkg = self.controller.last_audit_package
+        if pkg is None:
+            return _NO_AUDIT_TEXT
+        return pkg.package_id[:16] + "…"
+
+    @property
+    def comparison_package_id_text(self) -> str:
+        """Short display of the loaded comparison package ID."""
+        pkg = self.controller.comparison_audit_package
+        if pkg is None:
+            return _NO_COMPARISON_TEXT
+        return pkg.package_id[:16] + "…"
+
+    @property
+    def audit_comparison_status_text(self) -> str:
+        """Presentation text for the current audit comparison status."""
+        result = self.controller.last_audit_comparison
+        if result is None:
+            return "NOT COMPARED"
+        return result.status.value.upper()
+
+    @property
+    def change_impact_status_text(self) -> str:
+        """Presentation text for the overall change impact."""
+        result = self.controller.last_change_impact
+        if result is None:
+            return _NO_CHANGE_IMPACT_TEXT
+        return result.overall_impact.value.upper()
+
+    def audit_comparison_changes_rows(self) -> list[dict[str, object]]:
+        """Presentation rows for the comparison changes treeview."""
+        result = self.controller.last_audit_comparison
+        if result is None:
+            return []
+        rows: list[dict[str, object]] = []
+        for change in result.changes:
+            rows.append({
+                "significance": change.significance.value,
+                "category": change.category.value,
+                "code": change.code.value,
+                "scope": change.scope,
+                "subject_id": change.subject_id,
+                "detail": change.detail,
+            })
+        return rows
+
+    def change_impact_rows(self) -> list[dict[str, object]]:
+        """Presentation rows for the change impact treeview."""
+        result = self.controller.last_change_impact
+        if result is None:
+            return []
+        rows: list[dict[str, object]] = []
+        for assessment in result.assessed_changes:
+            rows.append({
+                "impact": assessment.impact.value,
+                "reason": assessment.reason.value,
+                "code": assessment.change.code.value,
+                "category": assessment.change.category.value,
+                "scope": assessment.change.scope,
+                "detail": assessment.change.detail,
+            })
+        return rows
+
     def allocation_editor_rows(self) -> list[dict[str, object]]:
         """Rows for the allocation plan editor table; one per current contributor."""
         rows: list[dict[str, object]] = []
@@ -936,6 +1039,20 @@ class ToleranceWorkspaceView:
         )
         self._audit_violations_tree: Any = None
         self._audit_manifest_tree: Any = None
+        self._reference_package_id = tk.StringVar(
+            value=self._session.reference_package_id_text
+        )
+        self._comparison_package_id = tk.StringVar(
+            value=self._session.comparison_package_id_text
+        )
+        self._audit_comparison_status = tk.StringVar(
+            value=self._session.audit_comparison_status_text
+        )
+        self._change_impact_status = tk.StringVar(
+            value=self._session.change_impact_status_text
+        )
+        self._audit_comparison_changes_tree: Any = None
+        self._change_impact_tree: Any = None
         self._build()
         self._refresh_rows()
         self._refresh_allocation_plan()
@@ -946,6 +1063,7 @@ class ToleranceWorkspaceView:
         self._refresh_evidence()
         self._refresh_report()
         self._refresh_audit()
+        self._refresh_comparison()
 
     @property
     def controller(self) -> ToleranceWorkspaceController:
@@ -1304,9 +1422,11 @@ class ToleranceWorkspaceView:
 
         self._build_report_frame(main)
         self._build_audit_frame(main)
+        self._build_comparison_frame(main)
+        self._build_change_impact_frame(main)
 
         storage = ttk.Labelframe(main, text="Project File", padding=8)
-        storage.grid(row=16, column=0, sticky="ew", pady=(8, 0))
+        storage.grid(row=18, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(storage, text="Open Project", command=self._open).pack(side="left")
         ttk.Button(storage, text="Save Project", command=self._save).pack(
             side="left", padx=(8, 0)
@@ -2114,6 +2234,147 @@ class ToleranceWorkspaceView:
             for row in self._session.audit_manifest_rows():
                 mtree.insert("", "end", values=(
                     str(row["field"]), str(row["value"]),
+                ))
+
+    def _build_comparison_frame(self, main: Any) -> None:
+        ttk = self._ttk
+        frame = ttk.Labelframe(main, text="Audit Package Comparison", padding=8)
+        frame.grid(row=16, column=0, sticky="ew", pady=(8, 0))
+        frame.columnconfigure(1, weight=1)
+        ttk.Button(
+            frame,
+            text="Load Comparison Package",
+            command=self._load_comparison_package,
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Label(
+            frame, textvariable=self._comparison_package_id
+        ).grid(row=0, column=1, sticky="w")
+        ttk.Label(
+            frame, text="Reference Package:", font=("", 9, "bold")
+        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(
+            frame, textvariable=self._reference_package_id
+        ).grid(row=1, column=1, sticky="w", pady=(6, 0))
+        ttk.Button(
+            frame,
+            text="Compare Audit Packages",
+            command=self._run_audit_comparison,
+        ).grid(row=2, column=0, sticky="w", pady=(6, 0), padx=(0, 12))
+        ttk.Label(
+            frame,
+            textvariable=self._audit_comparison_status,
+            font=("", 10, "bold"),
+        ).grid(row=2, column=1, sticky="w", pady=(6, 0))
+        self._audit_comparison_changes_tree = ttk.Treeview(
+            frame,
+            columns=("significance", "category", "code", "scope", "subject_id",
+                     "detail"),
+            show="headings",
+            height=4,
+        )
+        _change_cols = (
+            ("significance", "Significance", 110),
+            ("category", "Category", 110),
+            ("code", "Code", 160),
+            ("scope", "Scope", 90),
+            ("subject_id", "Subject", 80),
+            ("detail", "Detail", 180),
+        )
+        for key, label, width in _change_cols:
+            self._audit_comparison_changes_tree.heading(key, text=label)
+            self._audit_comparison_changes_tree.column(key, width=width, stretch=True)
+        self._audit_comparison_changes_tree.grid(
+            row=3, column=0, columnspan=2, sticky="nsew", pady=(6, 0)
+        )
+
+    def _build_change_impact_frame(self, main: Any) -> None:
+        ttk = self._ttk
+        frame = ttk.Labelframe(main, text="Change Impact", padding=8)
+        frame.grid(row=17, column=0, sticky="ew", pady=(8, 0))
+        frame.columnconfigure(1, weight=1)
+        ttk.Button(
+            frame,
+            text="Evaluate Change Impact",
+            command=self._run_change_impact,
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Label(
+            frame,
+            textvariable=self._change_impact_status,
+            font=("", 10, "bold"),
+        ).grid(row=0, column=1, sticky="w")
+        self._change_impact_tree = ttk.Treeview(
+            frame,
+            columns=("impact", "reason", "code", "category", "scope", "detail"),
+            show="headings",
+            height=4,
+        )
+        _impact_cols = (
+            ("impact", "Impact", 130),
+            ("reason", "Reason", 160),
+            ("code", "Code", 160),
+            ("category", "Category", 110),
+            ("scope", "Scope", 90),
+            ("detail", "Detail", 180),
+        )
+        for key, label, width in _impact_cols:
+            self._change_impact_tree.heading(key, text=label)
+            self._change_impact_tree.column(key, width=width, stretch=True)
+        self._change_impact_tree.grid(
+            row=1, column=0, columnspan=2, sticky="nsew", pady=(6, 0)
+        )
+
+    def _load_comparison_package(self) -> None:
+        self._guard(lambda: self._load_comparison_package_impl())
+
+    def _load_comparison_package_impl(self) -> None:
+        path = self._filedialog.askopenfilename(
+            filetypes=[("Audit package JSON", "*.json"), ("All files", "*.*")],
+            title="Load Comparison Audit Package",
+        )
+        if not path:
+            return
+        self._session.load_comparison_package(path)
+        self._refresh_comparison()
+
+    def _run_audit_comparison(self) -> None:
+        self._guard(lambda: self._run_audit_comparison_impl())
+
+    def _run_audit_comparison_impl(self) -> None:
+        self._session.run_audit_comparison()
+        self._refresh_comparison()
+
+    def _run_change_impact(self) -> None:
+        self._guard(lambda: self._run_change_impact_impl())
+
+    def _run_change_impact_impl(self) -> None:
+        self._session.run_change_impact()
+        self._refresh_comparison()
+
+    def _refresh_comparison(self) -> None:
+        """Keep Audit Comparison and Change Impact panels in step with controller."""
+        self._reference_package_id.set(self._session.reference_package_id_text)
+        self._comparison_package_id.set(self._session.comparison_package_id_text)
+        self._audit_comparison_status.set(self._session.audit_comparison_status_text)
+        self._change_impact_status.set(self._session.change_impact_status_text)
+        ctree = self._audit_comparison_changes_tree
+        if ctree is not None:
+            for row_id in ctree.get_children():
+                ctree.delete(row_id)
+            for row in self._session.audit_comparison_changes_rows():
+                ctree.insert("", "end", values=(
+                    str(row["significance"]), str(row["category"]),
+                    str(row["code"]), str(row["scope"]),
+                    str(row["subject_id"]), str(row["detail"]),
+                ))
+        itree = self._change_impact_tree
+        if itree is not None:
+            for row_id in itree.get_children():
+                itree.delete(row_id)
+            for row in self._session.change_impact_rows():
+                itree.insert("", "end", values=(
+                    str(row["impact"]), str(row["reason"]),
+                    str(row["code"]), str(row["category"]),
+                    str(row["scope"]), str(row["detail"]),
                 ))
 
     def _guard(self, action: Callable[[], Any]) -> None:

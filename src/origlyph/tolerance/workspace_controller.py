@@ -15,9 +15,24 @@ from .audit import (
     ToleranceDecisionAuditPackage,
 )
 from .audit import (
+    audit_package_from_dict as _audit_package_from_dict,
+)
+from .audit import (
     build_decision_audit_package as _build_audit_package,
 )
 from .budget import worst_case_budget
+from .change_impact import (
+    AuditChangeImpactResult,
+)
+from .change_impact import (
+    assess_audit_change_impact as _assess_change_impact,
+)
+from .comparison import (
+    AuditPackageComparisonResult,
+)
+from .comparison import (
+    compare_decision_audit_packages as _compare_audit_packages,
+)
 from .decision import evaluate_tolerance_decision
 from .evidence import (
     DecisionEvidenceBundle,
@@ -572,6 +587,9 @@ class ToleranceWorkspaceController:
         self._last_decision_report: ToleranceDecisionReport | None = None
         self._last_audit_integrity: AuditIntegrityResult | None = None
         self._last_audit_package: ToleranceDecisionAuditPackage | None = None
+        self._comparison_audit_package: ToleranceDecisionAuditPackage | None = None
+        self._last_audit_comparison: AuditPackageComparisonResult | None = None
+        self._last_change_impact: AuditChangeImpactResult | None = None
 
     @property
     def state(self) -> WorkspaceState:
@@ -642,6 +660,18 @@ class ToleranceWorkspaceController:
         return self._last_audit_package
 
     @property
+    def comparison_audit_package(self) -> ToleranceDecisionAuditPackage | None:
+        return self._comparison_audit_package
+
+    @property
+    def last_audit_comparison(self) -> AuditPackageComparisonResult | None:
+        return self._last_audit_comparison
+
+    @property
+    def last_change_impact(self) -> AuditChangeImpactResult | None:
+        return self._last_change_impact
+
+    @property
     def statistical_allocation_plan(self) -> WorkspaceStatisticalAllocationPlan | None:
         return self._state.statistical_allocation_plan
 
@@ -673,6 +703,9 @@ class ToleranceWorkspaceController:
         instance._last_decision_report = None
         instance._last_audit_integrity = None
         instance._last_audit_package = None
+        instance._comparison_audit_package = None
+        instance._last_audit_comparison = None
+        instance._last_change_impact = None
         return instance
 
     @classmethod
@@ -717,6 +750,8 @@ class ToleranceWorkspaceController:
         self._last_decision_report = None
         self._last_audit_integrity = None
         self._last_audit_package = None
+        self._last_audit_comparison = None
+        self._last_change_impact = None
 
     def set_analysis_mode(self, analysis_mode: AnalysisMode | str) -> None:
         mode = _coerce_analysis_mode(analysis_mode)
@@ -732,6 +767,8 @@ class ToleranceWorkspaceController:
         self._last_decision_report = None
         self._last_audit_integrity = None
         self._last_audit_package = None
+        self._last_audit_comparison = None
+        self._last_change_impact = None
 
     def set_specification(
         self, specification: WorkspaceSpecification | None
@@ -776,6 +813,8 @@ class ToleranceWorkspaceController:
         self._last_decision_report = None
         self._last_audit_integrity = None
         self._last_audit_package = None
+        self._last_audit_comparison = None
+        self._last_change_impact = None
 
     def add_contributor(
         self,
@@ -876,6 +915,8 @@ class ToleranceWorkspaceController:
         self._last_decision_report = None
         self._last_audit_integrity = None
         self._last_audit_package = None
+        self._last_audit_comparison = None
+        self._last_change_impact = None
         return result
 
     def result_view(self) -> dict[str, object]:
@@ -935,6 +976,8 @@ class ToleranceWorkspaceController:
         self._last_decision_report = None
         self._last_audit_integrity = None
         self._last_audit_package = None
+        self._last_audit_comparison = None
+        self._last_change_impact = None
         return decision
 
     def run_decision_evidence(
@@ -964,6 +1007,8 @@ class ToleranceWorkspaceController:
         self._last_decision_report = None
         self._last_audit_integrity = None
         self._last_audit_package = None
+        self._last_audit_comparison = None
+        self._last_change_impact = None
         return bundle, explanation
 
     def run_decision_report(self) -> ToleranceDecisionReport:
@@ -996,6 +1041,8 @@ class ToleranceWorkspaceController:
         self._last_decision_report = report
         self._last_audit_integrity = None
         self._last_audit_package = None
+        self._last_audit_comparison = None
+        self._last_change_impact = None
         return report
 
     def run_audit_integrity(self) -> AuditIntegrityResult:
@@ -1020,6 +1067,8 @@ class ToleranceWorkspaceController:
         integrity = _validate_integrity(self._last_decision_report)
         self._last_audit_integrity = integrity
         self._last_audit_package = None
+        self._last_audit_comparison = None
+        self._last_change_impact = None
         return integrity
 
     def run_audit_package(self) -> ToleranceDecisionAuditPackage:
@@ -1046,7 +1095,90 @@ class ToleranceWorkspaceController:
             self._last_audit_integrity,
         )
         self._last_audit_package = package
+        self._last_audit_comparison = None
+        self._last_change_impact = None
         return package
+
+    def load_comparison_audit_package(
+        self, path: str | Path
+    ) -> ToleranceDecisionAuditPackage:
+        """Load a candidate audit package from a JSON file for comparison.
+
+        Delegates deserialization and verification to
+        :func:`~origlyph.tolerance.audit.audit_package_from_dict`.
+        Fails closed for malformed or unverifiable packages
+        (raises :exc:`~origlyph.tolerance.audit.InvalidDecisionAuditPackageError`).
+
+        Clears any stale comparison result and change impact.  Does not require
+        a current audit package to be cached — the two are loaded independently.
+
+        No fingerprint or hashing logic is duplicated here.
+        """
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise InvalidToleranceWorkspaceError(
+                "Comparison package file must contain a JSON object."
+            )
+        package = _audit_package_from_dict(payload, verify=True)
+        self._comparison_audit_package = package
+        self._last_audit_comparison = None
+        self._last_change_impact = None
+        return package
+
+    def run_audit_comparison(self) -> AuditPackageComparisonResult:
+        """Compare current and candidate audit packages using Stage 15P.
+
+        Delegates to
+        :func:`~origlyph.tolerance.comparison.compare_decision_audit_packages`.
+        Current package (baseline) is the cached :attr:`last_audit_package`.
+        Candidate is the externally loaded :attr:`comparison_audit_package`.
+        Result is runtime-derived; it is not persisted and does not affect
+        project identity.
+
+        Fail-closed: raises when either package is absent.  Call
+        :meth:`run_audit_package` and :meth:`load_comparison_audit_package`
+        first.
+
+        No difference calculation is duplicated here; all comparison logic
+        is delegated to the Stage 15P backend.
+        """
+        if self._last_audit_package is None:
+            raise InvalidToleranceWorkspaceError(
+                "Generate Audit Package first."
+            )
+        if self._comparison_audit_package is None:
+            raise InvalidToleranceWorkspaceError(
+                "Load Comparison Package first."
+            )
+        result = _compare_audit_packages(
+            self._last_audit_package,
+            self._comparison_audit_package,
+        )
+        self._last_audit_comparison = result
+        self._last_change_impact = None
+        return result
+
+    def run_change_impact(self) -> AuditChangeImpactResult:
+        """Assess change impact of a Stage 15P comparison result (Stage 15Q).
+
+        Delegates to
+        :func:`~origlyph.tolerance.change_impact.assess_audit_change_impact`.
+        Result is runtime-derived from the cached comparison result; it is not
+        persisted and does not affect project identity.
+
+        Fail-closed: raises when no comparison result is cached.  Call
+        :meth:`run_audit_comparison` first.
+
+        No impact classification is duplicated here; all assessment logic is
+        delegated to the Stage 15Q backend.
+        """
+        if self._last_audit_comparison is None:
+            raise InvalidToleranceWorkspaceError(
+                "Run Audit Comparison first."
+            )
+        impact = _assess_change_impact(self._last_audit_comparison)
+        self._last_change_impact = impact
+        return impact
 
     def run_sensitivity(
         self,
@@ -1390,6 +1522,8 @@ class ToleranceWorkspaceController:
         self._last_decision_report = None
         self._last_audit_integrity = None
         self._last_audit_package = None
+        self._last_audit_comparison = None
+        self._last_change_impact = None
 
     def _worst_case_stack(self) -> ToleranceStack:
         return ToleranceStack(

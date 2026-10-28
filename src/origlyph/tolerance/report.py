@@ -618,59 +618,59 @@ class ToleranceDecisionReport:
         if section is ReportSection.WORST_CASE:
             return {
                 "metrics": [m.as_dict() for m in self.worst_case_metrics],
-                "reason_refs": (),
-                "evidence_refs": (),
+                "reason_refs": [],
+                "evidence_refs": [],
             }
         if section is ReportSection.STATISTICAL:
             return {
                 "metrics": [m.as_dict() for m in self.statistical_metrics],
-                "reason_refs": (),
-                "evidence_refs": (),
+                "reason_refs": [],
+                "evidence_refs": [],
             }
         if section is ReportSection.CORRELATION:
             return {
                 "metrics": [m.as_dict() for m in self.correlation_metrics],
-                "reason_refs": (),
-                "evidence_refs": (),
+                "reason_refs": [],
+                "evidence_refs": [],
             }
         if section is ReportSection.SENSITIVITY:
             return {
                 "metrics": [m.as_dict() for m in self.sensitivity_metrics],
-                "reason_refs": (),
-                "evidence_refs": (),
+                "reason_refs": [],
+                "evidence_refs": [],
             }
         if section is ReportSection.BUDGET:
             return {
                 "metrics": [m.as_dict() for m in self.budget_metrics],
-                "reason_refs": (),
-                "evidence_refs": (),
+                "reason_refs": [],
+                "evidence_refs": [],
             }
         if section is ReportSection.ALLOCATION:
             return {
                 "metrics": [m.as_dict() for m in self.allocation_metrics],
-                "reason_refs": (),
-                "evidence_refs": (),
+                "reason_refs": [],
+                "evidence_refs": [],
             }
         if section is ReportSection.WORST_CASE_RECONCILIATION:
             return {
                 "metrics": [
                     m.as_dict() for m in self.worst_case_reconciliation_metrics
                 ],
-                "reason_refs": (),
-                "evidence_refs": (),
+                "reason_refs": [],
+                "evidence_refs": [],
             }
         if section is ReportSection.STATISTICAL_RECONCILIATION:
             return {
                 "metrics": [
                     m.as_dict() for m in self.statistical_reconciliation_metrics
                 ],
-                "reason_refs": (),
-                "evidence_refs": (),
+                "reason_refs": [],
+                "evidence_refs": [],
             }
         if section is ReportSection.EVIDENCE:
             return {
                 "metrics": [],
-                "reason_refs": (),
+                "reason_refs": [],
                 "evidence_refs": [ref.as_dict() for ref in self.evidence_refs],
             }
         raise InvalidDecisionReportError(f"unknown report section {section!r}")

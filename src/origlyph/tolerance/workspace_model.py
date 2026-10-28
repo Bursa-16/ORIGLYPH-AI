@@ -7,6 +7,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .evidence import (
+    DecisionEvidenceBundle,
+    DecisionExplanation,
+)
 from .models import (
     AllocationReconciliationResult,
     AllocationValidationResult,
@@ -42,6 +46,7 @@ _NO_BUDGET_TEXT = "NOT RUN"
 _NO_ALLOCATION_VALIDATION_TEXT = "NOT VALIDATED"
 _NO_RECONCILIATION_TEXT = "NOT RUN"
 _NO_STAT_RECONCILIATION_TEXT = "NOT RUN"
+_NO_EVIDENCE_TEXT = "NOT GENERATED"
 _MODE_DISPLAY_NAMES: dict[str, str] = {
     "worst_case": "Worst Case",
     "rss_statistical": "RSS Statistical",
@@ -494,6 +499,56 @@ class WorkspaceSession:
             })
         return rows
 
+    @property
+    def last_evidence(self) -> DecisionEvidenceBundle | None:
+        """Current decision evidence bundle; None before Generate Evidence is called."""
+        return self.controller.last_evidence
+
+    @property
+    def last_explanation(self) -> DecisionExplanation | None:
+        """Current decision explanation; None before Generate Evidence is called."""
+        return self.controller.last_explanation
+
+    def generate_evidence(
+        self,
+    ) -> tuple[DecisionEvidenceBundle, DecisionExplanation]:
+        """Delegate evidence generation to the controller (Stage 15L)."""
+        return self.controller.run_decision_evidence()
+
+    @property
+    def evidence_status_text(self) -> str:
+        """Presentation text for the current evidence state; never stale."""
+        evidence = self.controller.last_evidence
+        if evidence is None:
+            return _NO_EVIDENCE_TEXT
+        return evidence.decision_status.value.upper()
+
+    @property
+    def explanation_summary_text(self) -> str:
+        """Compact deterministic explanation summary; empty when not generated."""
+        explanation = self.controller.last_explanation
+        if explanation is None:
+            return ""
+        return explanation.summary
+
+    def evidence_items_rows(self) -> list[dict[str, object]]:
+        """Presentation rows for the evidence items treeview; empty when not run."""
+        evidence = self.controller.last_evidence
+        if evidence is None:
+            return []
+        rows: list[dict[str, object]] = []
+        for item in evidence.evidence_items:
+            rows.append({
+                "evidence_code": item.evidence_code,
+                "source": item.source.value,
+                "scope": item.scope if item.scope is not None else "—",
+                "observed_value": item.observed_value,
+                "reference_value": item.reference_value,
+                "severity": item.severity.value,
+                "detail": item.detail,
+            })
+        return rows
+
     def allocation_editor_rows(self) -> list[dict[str, object]]:
         """Rows for the allocation plan editor table; one per current contributor."""
         rows: list[dict[str, object]] = []
@@ -696,6 +751,11 @@ class ToleranceWorkspaceView:
         )
         self._stat_alloc_plan_tree: Any = None
         self._stat_reconciliation_tree: Any = None
+        self._evidence_status = tk.StringVar(
+            value=self._session.evidence_status_text
+        )
+        self._explanation_summary = tk.StringVar(value="")
+        self._evidence_tree: Any = None
         self._build()
         self._refresh_rows()
         self._refresh_allocation_plan()
@@ -703,6 +763,7 @@ class ToleranceWorkspaceView:
         self._refresh_reconciliation()
         self._refresh_statistical_allocation_plan()
         self._refresh_statistical_reconciliation()
+        self._refresh_evidence()
 
     @property
     def controller(self) -> ToleranceWorkspaceController:
@@ -950,6 +1011,8 @@ class ToleranceWorkspaceView:
             row=2, column=0, columnspan=2, sticky="nsew", pady=(6, 0)
         )
 
+        self._build_evidence_frame(main)
+
         stat_alloc_plan = ttk.Labelframe(
             main, text="Statistical Allocation Plan", padding=8
         )
@@ -1194,6 +1257,7 @@ class ToleranceWorkspaceView:
         self._refresh_reconciliation()
         self._refresh_statistical_allocation_plan()
         self._refresh_statistical_reconciliation()
+        self._refresh_evidence()
 
     def _refresh_decision(self) -> None:
         """Keep the Decision labels in step with the controller cache."""
@@ -1207,6 +1271,7 @@ class ToleranceWorkspaceView:
         self._sync_header()
         self._session.evaluate_decision()
         self._refresh_decision()
+        self._refresh_evidence()
 
     def _refresh_sensitivity(self) -> None:
         """Keep the Sensitivity treeview in step with the controller cache."""
@@ -1636,6 +1701,82 @@ class ToleranceWorkspaceView:
                     f"{row['margin']:.6g}",
                     util_str,
                     str(row["status"]),
+                ),
+            )
+
+    def _build_evidence_frame(self, main: Any) -> None:
+        ttk = self._ttk
+        evidence_frame = ttk.Labelframe(
+            main, text="Decision Evidence & Explanation", padding=8
+        )
+        evidence_frame.grid(row=11, column=0, sticky="ew", pady=(8, 0))
+        evidence_frame.columnconfigure(1, weight=1)
+        ttk.Button(
+            evidence_frame, text="Generate Evidence", command=self._generate_evidence
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Label(
+            evidence_frame,
+            textvariable=self._evidence_status,
+            font=("", 10, "bold"),
+        ).grid(row=0, column=1, sticky="w")
+        ttk.Label(
+            evidence_frame, textvariable=self._explanation_summary
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self._evidence_tree = ttk.Treeview(
+            evidence_frame,
+            columns=("code", "source", "scope", "observed", "reference",
+                     "severity", "detail"),
+            show="headings",
+            height=5,
+        )
+        _evidence_cols = (
+            ("code", "Evidence Code", 160),
+            ("source", "Source", 100),
+            ("scope", "Scope", 90),
+            ("observed", "Observed", 90),
+            ("reference", "Reference", 90),
+            ("severity", "Severity", 75),
+            ("detail", "Detail", 200),
+        )
+        for key, label, width in _evidence_cols:
+            self._evidence_tree.heading(key, text=label)
+            self._evidence_tree.column(key, width=width, stretch=True)
+        self._evidence_tree.grid(
+            row=2, column=0, columnspan=2, sticky="nsew", pady=(6, 0)
+        )
+
+    def _generate_evidence(self) -> None:
+        self._guard(lambda: self._generate_evidence_impl())
+
+    def _generate_evidence_impl(self) -> None:
+        self._session.generate_evidence()
+        self._refresh_evidence()
+
+    def _refresh_evidence(self) -> None:
+        """Keep the Evidence panel in step with the controller cache."""
+        self._evidence_status.set(self._session.evidence_status_text)
+        self._explanation_summary.set(self._session.explanation_summary_text)
+        tree = self._evidence_tree
+        if tree is None:
+            return
+        for row_id in tree.get_children():
+            tree.delete(row_id)
+        for row in self._session.evidence_items_rows():
+            obs = row["observed_value"]
+            ref = row["reference_value"]
+            obs_str = f"{obs:.6g}" if obs is not None else "—"
+            ref_str = f"{ref:.6g}" if ref is not None else "—"
+            tree.insert(
+                "",
+                "end",
+                values=(
+                    str(row["evidence_code"]),
+                    str(row["source"]),
+                    str(row["scope"]),
+                    obs_str,
+                    ref_str,
+                    str(row["severity"]),
+                    str(row["detail"]),
                 ),
             )
 

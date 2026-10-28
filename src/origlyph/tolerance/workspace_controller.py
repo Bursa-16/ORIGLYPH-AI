@@ -11,6 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from .allocation import validate_allocation as _stage15_validate_allocation
+from .audit import (
+    ToleranceDecisionAuditPackage,
+)
+from .audit import (
+    build_decision_audit_package as _build_audit_package,
+)
 from .budget import worst_case_budget
 from .decision import evaluate_tolerance_decision
 from .evidence import (
@@ -24,6 +30,12 @@ from .evidence import (
     explain_tolerance_decision as _explain_tolerance_decision,
 )
 from .exceptions import OriglyphToleranceError
+from .integrity import (
+    AuditIntegrityResult,
+)
+from .integrity import (
+    validate_decision_report_integrity as _validate_integrity,
+)
 from .models import (
     AllocationPlan,
     AllocationReconciliationResult,
@@ -558,6 +570,8 @@ class ToleranceWorkspaceController:
         self._last_evidence: DecisionEvidenceBundle | None = None
         self._last_explanation: DecisionExplanation | None = None
         self._last_decision_report: ToleranceDecisionReport | None = None
+        self._last_audit_integrity: AuditIntegrityResult | None = None
+        self._last_audit_package: ToleranceDecisionAuditPackage | None = None
 
     @property
     def state(self) -> WorkspaceState:
@@ -620,6 +634,14 @@ class ToleranceWorkspaceController:
         return self._last_decision_report
 
     @property
+    def last_audit_integrity(self) -> AuditIntegrityResult | None:
+        return self._last_audit_integrity
+
+    @property
+    def last_audit_package(self) -> ToleranceDecisionAuditPackage | None:
+        return self._last_audit_package
+
+    @property
     def statistical_allocation_plan(self) -> WorkspaceStatisticalAllocationPlan | None:
         return self._state.statistical_allocation_plan
 
@@ -649,6 +671,8 @@ class ToleranceWorkspaceController:
         instance._last_evidence = None
         instance._last_explanation = None
         instance._last_decision_report = None
+        instance._last_audit_integrity = None
+        instance._last_audit_package = None
         return instance
 
     @classmethod
@@ -691,6 +715,8 @@ class ToleranceWorkspaceController:
         self._last_evidence = None
         self._last_explanation = None
         self._last_decision_report = None
+        self._last_audit_integrity = None
+        self._last_audit_package = None
 
     def set_analysis_mode(self, analysis_mode: AnalysisMode | str) -> None:
         mode = _coerce_analysis_mode(analysis_mode)
@@ -704,6 +730,8 @@ class ToleranceWorkspaceController:
         self._last_evidence = None
         self._last_explanation = None
         self._last_decision_report = None
+        self._last_audit_integrity = None
+        self._last_audit_package = None
 
     def set_specification(
         self, specification: WorkspaceSpecification | None
@@ -746,6 +774,8 @@ class ToleranceWorkspaceController:
         self._last_evidence = None
         self._last_explanation = None
         self._last_decision_report = None
+        self._last_audit_integrity = None
+        self._last_audit_package = None
 
     def add_contributor(
         self,
@@ -844,6 +874,8 @@ class ToleranceWorkspaceController:
         self._last_evidence = None
         self._last_explanation = None
         self._last_decision_report = None
+        self._last_audit_integrity = None
+        self._last_audit_package = None
         return result
 
     def result_view(self) -> dict[str, object]:
@@ -901,6 +933,8 @@ class ToleranceWorkspaceController:
         self._last_evidence = None
         self._last_explanation = None
         self._last_decision_report = None
+        self._last_audit_integrity = None
+        self._last_audit_package = None
         return decision
 
     def run_decision_evidence(
@@ -928,6 +962,8 @@ class ToleranceWorkspaceController:
         self._last_evidence = bundle
         self._last_explanation = explanation
         self._last_decision_report = None
+        self._last_audit_integrity = None
+        self._last_audit_package = None
         return bundle, explanation
 
     def run_decision_report(self) -> ToleranceDecisionReport:
@@ -958,7 +994,59 @@ class ToleranceWorkspaceController:
             self._last_explanation,
         )
         self._last_decision_report = report
+        self._last_audit_integrity = None
+        self._last_audit_package = None
         return report
+
+    def run_audit_integrity(self) -> AuditIntegrityResult:
+        """Validate structural integrity of the decision report (Stage 15N).
+
+        Delegates to
+        :func:`~origlyph.tolerance.integrity.validate_decision_report_integrity`.
+        Result is runtime-derived from the current report snapshot; it is not
+        persisted and does not affect project identity.
+
+        Fail-closed: raises when no decision report is cached.  Call
+        :meth:`run_decision_report` first.
+
+        No engineering math is duplicated here; integrity validation inspects
+        the report envelope for structural consistency and does not recompute
+        any tolerance calculation.
+        """
+        if self._last_decision_report is None:
+            raise InvalidToleranceWorkspaceError(
+                "Generate Decision Report first."
+            )
+        integrity = _validate_integrity(self._last_decision_report)
+        self._last_audit_integrity = integrity
+        self._last_audit_package = None
+        return integrity
+
+    def run_audit_package(self) -> ToleranceDecisionAuditPackage:
+        """Build deterministic audit package using Stage 15O.
+
+        Delegates to
+        :func:`~origlyph.tolerance.audit.build_decision_audit_package`.
+        Uses cached integrity result if available; otherwise the backend
+        computes it internally.  Result is runtime-derived; it is not persisted
+        and does not affect project identity.
+
+        Fail-closed: raises when no decision report is cached.  Call
+        :meth:`run_decision_report` first.
+
+        No fingerprint or hashing logic is duplicated here; all package
+        construction is delegated to the Stage 15O backend.
+        """
+        if self._last_decision_report is None:
+            raise InvalidToleranceWorkspaceError(
+                "Generate Decision Report first."
+            )
+        package = _build_audit_package(
+            self._last_decision_report,
+            self._last_audit_integrity,
+        )
+        self._last_audit_package = package
+        return package
 
     def run_sensitivity(
         self,
@@ -1300,6 +1388,8 @@ class ToleranceWorkspaceController:
         self._last_evidence = None
         self._last_explanation = None
         self._last_decision_report = None
+        self._last_audit_integrity = None
+        self._last_audit_package = None
 
     def _worst_case_stack(self) -> ToleranceStack:
         return ToleranceStack(

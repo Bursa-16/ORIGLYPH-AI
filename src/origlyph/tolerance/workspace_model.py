@@ -7,9 +7,15 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .audit import (
+    ToleranceDecisionAuditPackage,
+)
 from .evidence import (
     DecisionEvidenceBundle,
     DecisionExplanation,
+)
+from .integrity import (
+    AuditIntegrityResult,
 )
 from .models import (
     AllocationReconciliationResult,
@@ -49,6 +55,7 @@ _NO_RECONCILIATION_TEXT = "NOT RUN"
 _NO_STAT_RECONCILIATION_TEXT = "NOT RUN"
 _NO_EVIDENCE_TEXT = "NOT GENERATED"
 _NO_REPORT_TEXT = "NOT GENERATED"
+_NO_AUDIT_TEXT = "NOT GENERATED"
 _MODE_DISPLAY_NAMES: dict[str, str] = {
     "worst_case": "Worst Case",
     "rss_statistical": "RSS Statistical",
@@ -616,6 +623,98 @@ class WorkspaceSession:
             })
         return rows
 
+    # --- Audit Integrity + Audit Package (Stage 20D) ---
+
+    @property
+    def last_audit_integrity(self) -> AuditIntegrityResult | None:
+        """Current audit integrity result; None before Generate Audit Package."""
+        return self.controller.last_audit_integrity
+
+    @property
+    def last_audit_package(self) -> ToleranceDecisionAuditPackage | None:
+        """Current audit package; None before Generate Audit Package."""
+        return self.controller.last_audit_package
+
+    def run_audit_integrity(self) -> AuditIntegrityResult:
+        """Delegate audit integrity validation to the controller (Stage 15N)."""
+        return self.controller.run_audit_integrity()
+
+    def generate_audit_package(self) -> ToleranceDecisionAuditPackage:
+        """Delegate audit package generation to the controller (Stage 15O)."""
+        return self.controller.run_audit_package()
+
+    @property
+    def audit_integrity_status_text(self) -> str:
+        """Presentation text for the current audit integrity state."""
+        integrity = self.controller.last_audit_integrity
+        if integrity is None:
+            return _NO_AUDIT_TEXT
+        return integrity.status.value.upper()
+
+    @property
+    def audit_package_status_text(self) -> str:
+        """Presentation text for the current audit package replayability."""
+        package = self.controller.last_audit_package
+        if package is None:
+            return _NO_AUDIT_TEXT
+        return package.replayability_status.value.upper()
+
+    @property
+    def audit_package_id_text(self) -> str:
+        """Short display of the audit package_id; empty when not generated."""
+        package = self.controller.last_audit_package
+        if package is None:
+            return ""
+        return package.package_id[:16] + "…"
+
+    def audit_integrity_violations_rows(self) -> list[dict[str, object]]:
+        """Presentation rows for the integrity violations treeview."""
+        integrity = self.controller.last_audit_integrity
+        if integrity is None:
+            return []
+        rows: list[dict[str, object]] = []
+        for v in integrity.violations:
+            rows.append({
+                "severity": v.severity.value,
+                "code": v.code.value,
+                "scope": v.scope,
+                "subject": v.subject,
+                "detail": v.detail,
+            })
+        return rows
+
+    def audit_manifest_rows(self) -> list[dict[str, object]]:
+        """Presentation rows for the replay manifest treeview."""
+        package = self.controller.last_audit_package
+        if package is None:
+            return []
+        manifest = package.replay_manifest
+        rows: list[dict[str, object]] = [
+            {"field": "Package ID", "value": manifest.package_id[:24] + "…"},
+            {"field": "Decision ID", "value": manifest.decision_id[:24] + "…"},
+            {"field": "Integrity", "value": manifest.integrity_status.value},
+            {
+                "field": "Replayable",
+                "value": package.replayability_status.value,
+            },
+            {"field": "Complete", "value": str(manifest.is_complete)},
+            {
+                "field": "Equality ε",
+                "value": f"{manifest.equality_tolerance:.6g}",
+            },
+        ]
+        if manifest.sigma_multiplier is not None:
+            rows.append(
+                {"field": "σ multiplier", "value": f"{manifest.sigma_multiplier:.6g}"}
+            )
+        rows.append(
+            {"field": "Input FP", "value": manifest.input_fingerprint[:16] + "…"}
+        )
+        rows.append(
+            {"field": "Report FP", "value": manifest.report_fingerprint[:16] + "…"}
+        )
+        return rows
+
     def allocation_editor_rows(self) -> list[dict[str, object]]:
         """Rows for the allocation plan editor table; one per current contributor."""
         rows: list[dict[str, object]] = []
@@ -826,6 +925,17 @@ class ToleranceWorkspaceView:
         self._report_status = tk.StringVar(value=self._session.report_status_text)
         self._report_summary = tk.StringVar(value="")
         self._report_tree: Any = None
+        self._audit_integrity_status = tk.StringVar(
+            value=self._session.audit_integrity_status_text
+        )
+        self._audit_package_status = tk.StringVar(
+            value=self._session.audit_package_status_text
+        )
+        self._audit_package_id = tk.StringVar(
+            value=self._session.audit_package_id_text
+        )
+        self._audit_violations_tree: Any = None
+        self._audit_manifest_tree: Any = None
         self._build()
         self._refresh_rows()
         self._refresh_allocation_plan()
@@ -835,6 +945,7 @@ class ToleranceWorkspaceView:
         self._refresh_statistical_reconciliation()
         self._refresh_evidence()
         self._refresh_report()
+        self._refresh_audit()
 
     @property
     def controller(self) -> ToleranceWorkspaceController:
@@ -1192,9 +1303,10 @@ class ToleranceWorkspaceView:
         )
 
         self._build_report_frame(main)
+        self._build_audit_frame(main)
 
         storage = ttk.Labelframe(main, text="Project File", padding=8)
-        storage.grid(row=15, column=0, sticky="ew", pady=(8, 0))
+        storage.grid(row=16, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(storage, text="Open Project", command=self._open).pack(side="left")
         ttk.Button(storage, text="Save Project", command=self._save).pack(
             side="left", padx=(8, 0)
@@ -1913,6 +2025,96 @@ class ToleranceWorkspaceView:
                 str(row["name"]), str(row["type"]),
                 str(row["value"]), str(row["sigma"]),
             ))
+
+    def _build_audit_frame(self, main: Any) -> None:
+        ttk = self._ttk
+        audit_frame = ttk.Labelframe(main, text="Audit Package", padding=8)
+        audit_frame.grid(row=15, column=0, sticky="ew", pady=(8, 0))
+        audit_frame.columnconfigure(1, weight=1)
+        ttk.Button(
+            audit_frame,
+            text="Generate Audit Package",
+            command=self._run_audit_package,
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Label(
+            audit_frame,
+            textvariable=self._audit_package_status,
+            font=("", 10, "bold"),
+        ).grid(row=0, column=1, sticky="w")
+        ttk.Label(
+            audit_frame, text="Integrity:", font=("", 9, "bold")
+        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(
+            audit_frame, textvariable=self._audit_integrity_status
+        ).grid(row=1, column=1, sticky="w", pady=(6, 0))
+        ttk.Label(
+            audit_frame, text="Package ID:", font=("", 9, "bold")
+        ).grid(row=2, column=0, sticky="w")
+        ttk.Label(
+            audit_frame, textvariable=self._audit_package_id
+        ).grid(row=2, column=1, sticky="w")
+        self._audit_violations_tree = ttk.Treeview(
+            audit_frame,
+            columns=("severity", "code", "scope", "subject", "detail"),
+            show="headings",
+            height=3,
+        )
+        _violations_cols = (
+            ("severity", "Severity", 70),
+            ("code", "Code", 140),
+            ("scope", "Scope", 90),
+            ("subject", "Subject", 90),
+            ("detail", "Detail", 180),
+        )
+        for key, label, width in _violations_cols:
+            self._audit_violations_tree.heading(key, text=label)
+            self._audit_violations_tree.column(key, width=width, stretch=True)
+        self._audit_violations_tree.grid(
+            row=3, column=0, columnspan=2, sticky="nsew", pady=(6, 0)
+        )
+        self._audit_manifest_tree = ttk.Treeview(
+            audit_frame,
+            columns=("field", "value"),
+            show="headings",
+            height=5,
+        )
+        self._audit_manifest_tree.heading("field", text="Manifest Field")
+        self._audit_manifest_tree.column("field", width=120, stretch=False)
+        self._audit_manifest_tree.heading("value", text="Value")
+        self._audit_manifest_tree.column("value", width=320, stretch=True)
+        self._audit_manifest_tree.grid(
+            row=4, column=0, columnspan=2, sticky="nsew", pady=(4, 0)
+        )
+
+    def _run_audit_package(self) -> None:
+        self._guard(lambda: self._run_audit_package_impl())
+
+    def _run_audit_package_impl(self) -> None:
+        self._session.generate_audit_package()
+        self._refresh_audit()
+
+    def _refresh_audit(self) -> None:
+        """Keep the Audit Package panel in step with the controller cache."""
+        self._audit_integrity_status.set(self._session.audit_integrity_status_text)
+        self._audit_package_status.set(self._session.audit_package_status_text)
+        self._audit_package_id.set(self._session.audit_package_id_text)
+        vtree = self._audit_violations_tree
+        if vtree is not None:
+            for row_id in vtree.get_children():
+                vtree.delete(row_id)
+            for row in self._session.audit_integrity_violations_rows():
+                vtree.insert("", "end", values=(
+                    str(row["severity"]), str(row["code"]),
+                    str(row["scope"]), str(row["subject"]), str(row["detail"]),
+                ))
+        mtree = self._audit_manifest_tree
+        if mtree is not None:
+            for row_id in mtree.get_children():
+                mtree.delete(row_id)
+            for row in self._session.audit_manifest_rows():
+                mtree.insert("", "end", values=(
+                    str(row["field"]), str(row["value"]),
+                ))
 
     def _guard(self, action: Callable[[], Any]) -> None:
         try:

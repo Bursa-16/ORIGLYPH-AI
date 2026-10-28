@@ -43,6 +43,12 @@ from .models import (
     WorstCaseResult,
 )
 from .reconciliation import reconcile_allocation as _reconcile_allocation
+from .report import (
+    ToleranceDecisionReport,
+)
+from .report import (
+    build_decision_report as _build_decision_report,
+)
 from .sensitivity import (
     StatisticalSensitivityResult,
     WorstCaseSensitivityResult,
@@ -551,6 +557,7 @@ class ToleranceWorkspaceController:
         ) = None
         self._last_evidence: DecisionEvidenceBundle | None = None
         self._last_explanation: DecisionExplanation | None = None
+        self._last_decision_report: ToleranceDecisionReport | None = None
 
     @property
     def state(self) -> WorkspaceState:
@@ -609,6 +616,10 @@ class ToleranceWorkspaceController:
         return self._last_explanation
 
     @property
+    def last_decision_report(self) -> ToleranceDecisionReport | None:
+        return self._last_decision_report
+
+    @property
     def statistical_allocation_plan(self) -> WorkspaceStatisticalAllocationPlan | None:
         return self._state.statistical_allocation_plan
 
@@ -637,6 +648,7 @@ class ToleranceWorkspaceController:
         instance._last_statistical_reconciliation = None
         instance._last_evidence = None
         instance._last_explanation = None
+        instance._last_decision_report = None
         return instance
 
     @classmethod
@@ -678,6 +690,7 @@ class ToleranceWorkspaceController:
         self._last_budget = None
         self._last_evidence = None
         self._last_explanation = None
+        self._last_decision_report = None
 
     def set_analysis_mode(self, analysis_mode: AnalysisMode | str) -> None:
         mode = _coerce_analysis_mode(analysis_mode)
@@ -690,6 +703,7 @@ class ToleranceWorkspaceController:
         self._last_budget = None
         self._last_evidence = None
         self._last_explanation = None
+        self._last_decision_report = None
 
     def set_specification(
         self, specification: WorkspaceSpecification | None
@@ -731,6 +745,7 @@ class ToleranceWorkspaceController:
         self._last_budget = None
         self._last_evidence = None
         self._last_explanation = None
+        self._last_decision_report = None
 
     def add_contributor(
         self,
@@ -828,6 +843,7 @@ class ToleranceWorkspaceController:
         self._last_decision = None
         self._last_evidence = None
         self._last_explanation = None
+        self._last_decision_report = None
         return result
 
     def result_view(self) -> dict[str, object]:
@@ -884,6 +900,7 @@ class ToleranceWorkspaceController:
         self._last_decision = decision
         self._last_evidence = None
         self._last_explanation = None
+        self._last_decision_report = None
         return decision
 
     def run_decision_evidence(
@@ -910,7 +927,38 @@ class ToleranceWorkspaceController:
         explanation = _explain_tolerance_decision(self._last_decision, bundle)
         self._last_evidence = bundle
         self._last_explanation = explanation
+        self._last_decision_report = None
         return bundle, explanation
+
+    def run_decision_report(self) -> ToleranceDecisionReport:
+        """Build deterministic decision report using Stage 15M.
+
+        Delegates to :func:`~origlyph.tolerance.report.build_decision_report`.
+        Result is runtime-derived from the current decision, evidence and
+        explanation snapshots; it is not persisted and does not affect project
+        identity.
+
+        Fail-closed: raises when decision or evidence/explanation is missing.
+        Call :meth:`evaluate_decision` then :meth:`run_decision_evidence` first.
+
+        No engineering math is duplicated here; the report organizes existing
+        authoritative observations and does not recompute them.
+        """
+        if self._last_decision is None:
+            raise InvalidToleranceWorkspaceError(
+                "Run Decision first."
+            )
+        if self._last_evidence is None or self._last_explanation is None:
+            raise InvalidToleranceWorkspaceError(
+                "Generate Evidence first."
+            )
+        report = _build_decision_report(
+            self._last_decision,
+            self._last_evidence,
+            self._last_explanation,
+        )
+        self._last_decision_report = report
+        return report
 
     def run_sensitivity(
         self,
@@ -1251,6 +1299,7 @@ class ToleranceWorkspaceController:
         self._last_statistical_reconciliation = None
         self._last_evidence = None
         self._last_explanation = None
+        self._last_decision_report = None
 
     def _worst_case_stack(self) -> ToleranceStack:
         return ToleranceStack(

@@ -21,6 +21,7 @@ from .models import (
     ToleranceDecisionSeverity,
     WorstCaseBudgetResult,
 )
+from .report import ToleranceDecisionReport
 from .sensitivity import (
     StatisticalSensitivityResult,
     WorstCaseSensitivityResult,
@@ -47,6 +48,7 @@ _NO_ALLOCATION_VALIDATION_TEXT = "NOT VALIDATED"
 _NO_RECONCILIATION_TEXT = "NOT RUN"
 _NO_STAT_RECONCILIATION_TEXT = "NOT RUN"
 _NO_EVIDENCE_TEXT = "NOT GENERATED"
+_NO_REPORT_TEXT = "NOT GENERATED"
 _MODE_DISPLAY_NAMES: dict[str, str] = {
     "worst_case": "Worst Case",
     "rss_statistical": "RSS Statistical",
@@ -549,6 +551,71 @@ class WorkspaceSession:
             })
         return rows
 
+    @property
+    def last_decision_report(self) -> ToleranceDecisionReport | None:
+        """Current decision report; None before Generate Decision Report is called."""
+        return self.controller.last_decision_report
+
+    def generate_decision_report(self) -> ToleranceDecisionReport:
+        """Delegate decision report generation to the controller (Stage 15M)."""
+        return self.controller.run_decision_report()
+
+    @property
+    def report_status_text(self) -> str:
+        """Presentation text for the current report state; never stale."""
+        report = self.controller.last_decision_report
+        if report is None:
+            return _NO_REPORT_TEXT
+        return report.final_status.value.upper()
+
+    @property
+    def report_summary_text(self) -> str:
+        """Compact deterministic report summary text; empty when not generated."""
+        report = self.controller.last_decision_report
+        if report is None:
+            return ""
+        return report.summary_text
+
+    def report_contributors_rows(self) -> list[dict[str, object]]:
+        """Presentation rows for the report contributors treeview."""
+        report = self.controller.last_decision_report
+        if report is None:
+            return []
+        rows: list[dict[str, object]] = []
+        for c in report.contributors:
+            val = (
+                f"{c.contribution_value:.6g}"
+                if c.contribution_value is not None
+                else "—"
+            )
+            sig = (
+                f"{c.contribution_sigma:.6g}"
+                if c.contribution_sigma is not None
+                else "—"
+            )
+            rows.append({
+                "name": c.name,
+                "type": c.contribution_type,
+                "value": val,
+                "sigma": sig,
+            })
+        return rows
+
+    def report_evidence_refs_rows(self) -> list[dict[str, object]]:
+        """Presentation rows for the report evidence-refs treeview."""
+        report = self.controller.last_decision_report
+        if report is None:
+            return []
+        rows: list[dict[str, object]] = []
+        for ref in report.evidence_refs:
+            rows.append({
+                "evidence_id": ref.evidence_id,
+                "evidence_code": ref.evidence_code,
+                "source": ref.source,
+                "reason_code": ref.reason_code,
+            })
+        return rows
+
     def allocation_editor_rows(self) -> list[dict[str, object]]:
         """Rows for the allocation plan editor table; one per current contributor."""
         rows: list[dict[str, object]] = []
@@ -756,6 +823,9 @@ class ToleranceWorkspaceView:
         )
         self._explanation_summary = tk.StringVar(value="")
         self._evidence_tree: Any = None
+        self._report_status = tk.StringVar(value=self._session.report_status_text)
+        self._report_summary = tk.StringVar(value="")
+        self._report_tree: Any = None
         self._build()
         self._refresh_rows()
         self._refresh_allocation_plan()
@@ -764,6 +834,7 @@ class ToleranceWorkspaceView:
         self._refresh_statistical_allocation_plan()
         self._refresh_statistical_reconciliation()
         self._refresh_evidence()
+        self._refresh_report()
 
     @property
     def controller(self) -> ToleranceWorkspaceController:
@@ -1120,8 +1191,10 @@ class ToleranceWorkspaceView:
             row=2, column=0, columnspan=2, sticky="nsew", pady=(6, 0)
         )
 
+        self._build_report_frame(main)
+
         storage = ttk.Labelframe(main, text="Project File", padding=8)
-        storage.grid(row=14, column=0, sticky="ew", pady=(8, 0))
+        storage.grid(row=15, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(storage, text="Open Project", command=self._open).pack(side="left")
         ttk.Button(storage, text="Save Project", command=self._save).pack(
             side="left", padx=(8, 0)
@@ -1258,6 +1331,7 @@ class ToleranceWorkspaceView:
         self._refresh_statistical_allocation_plan()
         self._refresh_statistical_reconciliation()
         self._refresh_evidence()
+        self._refresh_report()
 
     def _refresh_decision(self) -> None:
         """Keep the Decision labels in step with the controller cache."""
@@ -1272,6 +1346,7 @@ class ToleranceWorkspaceView:
         self._session.evaluate_decision()
         self._refresh_decision()
         self._refresh_evidence()
+        self._refresh_report()
 
     def _refresh_sensitivity(self) -> None:
         """Keep the Sensitivity treeview in step with the controller cache."""
@@ -1779,6 +1854,65 @@ class ToleranceWorkspaceView:
                     str(row["detail"]),
                 ),
             )
+
+    def _build_report_frame(self, main: Any) -> None:
+        ttk = self._ttk
+        report_frame = ttk.Labelframe(
+            main, text="Decision Report", padding=8
+        )
+        report_frame.grid(row=14, column=0, sticky="ew", pady=(8, 0))
+        report_frame.columnconfigure(1, weight=1)
+        ttk.Button(
+            report_frame, text="Generate Decision Report", command=self._generate_report
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Label(
+            report_frame,
+            textvariable=self._report_status,
+            font=("", 10, "bold"),
+        ).grid(row=0, column=1, sticky="w")
+        ttk.Label(
+            report_frame, textvariable=self._report_summary
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self._report_tree = ttk.Treeview(
+            report_frame,
+            columns=("name", "type", "value", "sigma"),
+            show="headings",
+            height=4,
+        )
+        _report_cols = (
+            ("name", "Contributor", 160),
+            ("type", "Type", 100),
+            ("value", "Value", 90),
+            ("sigma", "Sigma", 90),
+        )
+        for key, label, width in _report_cols:
+            self._report_tree.heading(key, text=label)
+            self._report_tree.column(key, width=width, stretch=True)
+        self._report_tree.grid(
+            row=2, column=0, columnspan=2, sticky="nsew", pady=(6, 0)
+        )
+
+    def _generate_report(self) -> None:
+        self._guard(lambda: self._generate_report_impl())
+
+    def _generate_report_impl(self) -> None:
+        self._session.generate_decision_report()
+        self._refresh_report()
+
+    def _refresh_report(self) -> None:
+        """Keep the Decision Report panel in step with the controller cache."""
+        self._report_status.set(self._session.report_status_text)
+        self._report_summary.set(self._session.report_summary_text)
+        tree = self._report_tree
+        if tree is None:
+            return
+        for row_id in tree.get_children():
+            tree.delete(row_id)
+        for row in self._session.report_contributors_rows():
+            tree.insert("", "end", values=(
+                str(row["name"]), str(row["type"]),
+                str(row["value"]), str(row["sigma"]),
+            ))
 
     def _guard(self, action: Callable[[], Any]) -> None:
         try:

@@ -11,6 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from .allocation import validate_allocation as _stage15_validate_allocation
+from .approval_readiness import (
+    AuditApprovalReadinessResult,
+)
+from .approval_readiness import (
+    evaluate_audit_approval_readiness as _evaluate_approval_readiness,
+)
 from .audit import (
     ToleranceDecisionAuditPackage,
 )
@@ -21,6 +27,12 @@ from .audit import (
     build_decision_audit_package as _build_audit_package,
 )
 from .budget import worst_case_budget
+from .change_disposition import (
+    AuditChangeDispositionResult,
+)
+from .change_disposition import (
+    determine_audit_change_disposition as _determine_change_disposition,
+)
 from .change_impact import (
     AuditChangeImpactResult,
 )
@@ -590,6 +602,8 @@ class ToleranceWorkspaceController:
         self._comparison_audit_package: ToleranceDecisionAuditPackage | None = None
         self._last_audit_comparison: AuditPackageComparisonResult | None = None
         self._last_change_impact: AuditChangeImpactResult | None = None
+        self._last_change_disposition: AuditChangeDispositionResult | None = None
+        self._last_approval_readiness: AuditApprovalReadinessResult | None = None
 
     @property
     def state(self) -> WorkspaceState:
@@ -672,6 +686,14 @@ class ToleranceWorkspaceController:
         return self._last_change_impact
 
     @property
+    def last_change_disposition(self) -> AuditChangeDispositionResult | None:
+        return self._last_change_disposition
+
+    @property
+    def last_approval_readiness(self) -> AuditApprovalReadinessResult | None:
+        return self._last_approval_readiness
+
+    @property
     def statistical_allocation_plan(self) -> WorkspaceStatisticalAllocationPlan | None:
         return self._state.statistical_allocation_plan
 
@@ -706,6 +728,8 @@ class ToleranceWorkspaceController:
         instance._comparison_audit_package = None
         instance._last_audit_comparison = None
         instance._last_change_impact = None
+        instance._last_change_disposition = None
+        instance._last_approval_readiness = None
         return instance
 
     @classmethod
@@ -752,6 +776,8 @@ class ToleranceWorkspaceController:
         self._last_audit_package = None
         self._last_audit_comparison = None
         self._last_change_impact = None
+        self._last_change_disposition = None
+        self._last_approval_readiness = None
 
     def set_analysis_mode(self, analysis_mode: AnalysisMode | str) -> None:
         mode = _coerce_analysis_mode(analysis_mode)
@@ -769,6 +795,8 @@ class ToleranceWorkspaceController:
         self._last_audit_package = None
         self._last_audit_comparison = None
         self._last_change_impact = None
+        self._last_change_disposition = None
+        self._last_approval_readiness = None
 
     def set_specification(
         self, specification: WorkspaceSpecification | None
@@ -815,6 +843,8 @@ class ToleranceWorkspaceController:
         self._last_audit_package = None
         self._last_audit_comparison = None
         self._last_change_impact = None
+        self._last_change_disposition = None
+        self._last_approval_readiness = None
 
     def add_contributor(
         self,
@@ -917,6 +947,8 @@ class ToleranceWorkspaceController:
         self._last_audit_package = None
         self._last_audit_comparison = None
         self._last_change_impact = None
+        self._last_change_disposition = None
+        self._last_approval_readiness = None
         return result
 
     def result_view(self) -> dict[str, object]:
@@ -978,6 +1010,8 @@ class ToleranceWorkspaceController:
         self._last_audit_package = None
         self._last_audit_comparison = None
         self._last_change_impact = None
+        self._last_change_disposition = None
+        self._last_approval_readiness = None
         return decision
 
     def run_decision_evidence(
@@ -1009,6 +1043,8 @@ class ToleranceWorkspaceController:
         self._last_audit_package = None
         self._last_audit_comparison = None
         self._last_change_impact = None
+        self._last_change_disposition = None
+        self._last_approval_readiness = None
         return bundle, explanation
 
     def run_decision_report(self) -> ToleranceDecisionReport:
@@ -1043,6 +1079,8 @@ class ToleranceWorkspaceController:
         self._last_audit_package = None
         self._last_audit_comparison = None
         self._last_change_impact = None
+        self._last_change_disposition = None
+        self._last_approval_readiness = None
         return report
 
     def run_audit_integrity(self) -> AuditIntegrityResult:
@@ -1069,6 +1107,8 @@ class ToleranceWorkspaceController:
         self._last_audit_package = None
         self._last_audit_comparison = None
         self._last_change_impact = None
+        self._last_change_disposition = None
+        self._last_approval_readiness = None
         return integrity
 
     def run_audit_package(self) -> ToleranceDecisionAuditPackage:
@@ -1097,6 +1137,8 @@ class ToleranceWorkspaceController:
         self._last_audit_package = package
         self._last_audit_comparison = None
         self._last_change_impact = None
+        self._last_change_disposition = None
+        self._last_approval_readiness = None
         return package
 
     def load_comparison_audit_package(
@@ -1123,6 +1165,8 @@ class ToleranceWorkspaceController:
         self._comparison_audit_package = package
         self._last_audit_comparison = None
         self._last_change_impact = None
+        self._last_change_disposition = None
+        self._last_approval_readiness = None
         return package
 
     def run_audit_comparison(self) -> AuditPackageComparisonResult:
@@ -1156,6 +1200,8 @@ class ToleranceWorkspaceController:
         )
         self._last_audit_comparison = result
         self._last_change_impact = None
+        self._last_change_disposition = None
+        self._last_approval_readiness = None
         return result
 
     def run_change_impact(self) -> AuditChangeImpactResult:
@@ -1178,7 +1224,54 @@ class ToleranceWorkspaceController:
             )
         impact = _assess_change_impact(self._last_audit_comparison)
         self._last_change_impact = impact
+        self._last_change_disposition = None
+        self._last_approval_readiness = None
         return impact
+
+    def run_change_disposition(self) -> AuditChangeDispositionResult:
+        """Determine disposition of a Stage 15Q change impact result (Stage 15R).
+
+        Delegates to
+        :func:`~origlyph.tolerance.change_disposition.determine_audit_change_disposition`.
+        Result is runtime-derived from the cached impact result; it is not
+        persisted and does not affect project identity.
+
+        Fail-closed: raises when no change impact result is cached.  Call
+        :meth:`run_change_impact` first.
+
+        No disposition logic is duplicated here; all classification is
+        delegated to the Stage 15R backend.
+        """
+        if self._last_change_impact is None:
+            raise InvalidToleranceWorkspaceError(
+                "Evaluate Change Impact first."
+            )
+        disposition = _determine_change_disposition(self._last_change_impact)
+        self._last_change_disposition = disposition
+        self._last_approval_readiness = None
+        return disposition
+
+    def run_approval_readiness(self) -> AuditApprovalReadinessResult:
+        """Evaluate approval readiness from a Stage 15R disposition (Stage 15S).
+
+        Delegates to
+        :func:`~origlyph.tolerance.approval_readiness.evaluate_audit_approval_readiness`.
+        Result is runtime-derived from the cached disposition result; it is not
+        persisted and does not affect project identity.
+
+        Fail-closed: raises when no disposition result is cached.  Call
+        :meth:`run_change_disposition` first.
+
+        No readiness logic is duplicated here; all classification is
+        delegated to the Stage 15S backend.
+        """
+        if self._last_change_disposition is None:
+            raise InvalidToleranceWorkspaceError(
+                "Determine Change Disposition first."
+            )
+        readiness = _evaluate_approval_readiness(self._last_change_disposition)
+        self._last_approval_readiness = readiness
+        return readiness
 
     def run_sensitivity(
         self,
@@ -1524,6 +1617,8 @@ class ToleranceWorkspaceController:
         self._last_audit_package = None
         self._last_audit_comparison = None
         self._last_change_impact = None
+        self._last_change_disposition = None
+        self._last_approval_readiness = None
 
     def _worst_case_stack(self) -> ToleranceStack:
         return ToleranceStack(

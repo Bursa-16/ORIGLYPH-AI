@@ -7,8 +7,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .approval_readiness import (
+    AuditApprovalReadinessResult,
+)
 from .audit import (
     ToleranceDecisionAuditPackage,
+)
+from .change_disposition import (
+    AuditChangeDispositionResult,
 )
 from .change_impact import (
     AuditChangeImpactResult,
@@ -64,6 +70,8 @@ _NO_REPORT_TEXT = "NOT GENERATED"
 _NO_AUDIT_TEXT = "NOT GENERATED"
 _NO_COMPARISON_TEXT = "NOT LOADED"
 _NO_CHANGE_IMPACT_TEXT = "NOT EVALUATED"
+_NO_CHANGE_DISPOSITION_TEXT = "NOT DETERMINED"
+_NO_APPROVAL_READINESS_TEXT = "NOT EVALUATED"
 _MODE_DISPLAY_NAMES: dict[str, str] = {
     "worst_case": "Worst Case",
     "rss_statistical": "RSS Statistical",
@@ -818,6 +826,75 @@ class WorkspaceSession:
             })
         return rows
 
+    # --- Change Disposition + Approval Readiness (Stage 20F) ---
+
+    @property
+    def last_change_disposition(self) -> AuditChangeDispositionResult | None:
+        """Current change disposition result; None before Determine Disposition."""
+        return self.controller.last_change_disposition
+
+    @property
+    def last_approval_readiness(self) -> AuditApprovalReadinessResult | None:
+        """Current approval readiness result; None before Evaluate Readiness."""
+        return self.controller.last_approval_readiness
+
+    def run_change_disposition(self) -> AuditChangeDispositionResult:
+        """Delegate change disposition to the controller (Stage 15R)."""
+        return self.controller.run_change_disposition()
+
+    def run_approval_readiness(self) -> AuditApprovalReadinessResult:
+        """Delegate approval readiness evaluation to the controller (Stage 15S)."""
+        return self.controller.run_approval_readiness()
+
+    @property
+    def change_disposition_status_text(self) -> str:
+        """Presentation text for the current change disposition."""
+        result = self.controller.last_change_disposition
+        if result is None:
+            return _NO_CHANGE_DISPOSITION_TEXT
+        return result.disposition.value.upper()
+
+    @property
+    def approval_readiness_status_text(self) -> str:
+        """Presentation text for the current approval readiness state."""
+        result = self.controller.last_approval_readiness
+        if result is None:
+            return _NO_APPROVAL_READINESS_TEXT
+        return result.status.value.upper()
+
+    def change_disposition_reasons_rows(self) -> list[dict[str, object]]:
+        """Presentation rows for the change disposition reasons treeview."""
+        result = self.controller.last_change_disposition
+        if result is None:
+            return []
+        rows: list[dict[str, object]] = []
+        for reason in result.reasons:
+            rows.append({
+                "disposition": reason.disposition.value,
+                "code": reason.code.value,
+                "impact": reason.source_impact.value,
+                "impact_reason": reason.source_impact_reason.value,
+                "change_code": (
+                    reason.change.code.value if reason.change is not None else ""
+                ),
+            })
+        return rows
+
+    def approval_readiness_reasons_rows(self) -> list[dict[str, object]]:
+        """Presentation rows for the approval readiness reasons treeview."""
+        result = self.controller.last_approval_readiness
+        if result is None:
+            return []
+        rows: list[dict[str, object]] = []
+        for reason in result.reasons:
+            rows.append({
+                "status": reason.status.value,
+                "code": reason.code.value,
+                "source_disposition": reason.source_reason.disposition.value,
+                "source_code": reason.source_reason.code.value,
+            })
+        return rows
+
     def allocation_editor_rows(self) -> list[dict[str, object]]:
         """Rows for the allocation plan editor table; one per current contributor."""
         rows: list[dict[str, object]] = []
@@ -1053,6 +1130,14 @@ class ToleranceWorkspaceView:
         )
         self._audit_comparison_changes_tree: Any = None
         self._change_impact_tree: Any = None
+        self._change_disposition_status = tk.StringVar(
+            value=self._session.change_disposition_status_text
+        )
+        self._approval_readiness_status = tk.StringVar(
+            value=self._session.approval_readiness_status_text
+        )
+        self._change_disposition_reasons_tree: Any = None
+        self._approval_readiness_reasons_tree: Any = None
         self._build()
         self._refresh_rows()
         self._refresh_allocation_plan()
@@ -1064,6 +1149,7 @@ class ToleranceWorkspaceView:
         self._refresh_report()
         self._refresh_audit()
         self._refresh_comparison()
+        self._refresh_change_governance()
 
     @property
     def controller(self) -> ToleranceWorkspaceController:
@@ -1424,9 +1510,11 @@ class ToleranceWorkspaceView:
         self._build_audit_frame(main)
         self._build_comparison_frame(main)
         self._build_change_impact_frame(main)
+        self._build_change_disposition_frame(main)
+        self._build_approval_readiness_frame(main)
 
         storage = ttk.Labelframe(main, text="Project File", padding=8)
-        storage.grid(row=18, column=0, sticky="ew", pady=(8, 0))
+        storage.grid(row=20, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(storage, text="Open Project", command=self._open).pack(side="left")
         ttk.Button(storage, text="Save Project", command=self._save).pack(
             side="left", padx=(8, 0)
@@ -2375,6 +2463,119 @@ class ToleranceWorkspaceView:
                     str(row["impact"]), str(row["reason"]),
                     str(row["code"]), str(row["category"]),
                     str(row["scope"]), str(row["detail"]),
+                ))
+
+    def _build_change_disposition_frame(self, main: Any) -> None:
+        ttk = self._ttk
+        frame = ttk.Labelframe(main, text="Change Disposition", padding=8)
+        frame.grid(row=18, column=0, sticky="ew", pady=(8, 0))
+        frame.columnconfigure(1, weight=1)
+        ttk.Button(
+            frame,
+            text="Determine Change Disposition",
+            command=self._run_change_disposition,
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Label(
+            frame,
+            textvariable=self._change_disposition_status,
+            font=("", 10, "bold"),
+        ).grid(row=0, column=1, sticky="w")
+        self._change_disposition_reasons_tree = ttk.Treeview(
+            frame,
+            columns=("disposition", "code", "impact", "impact_reason", "change_code"),
+            show="headings",
+            height=4,
+        )
+        _disp_cols = (
+            ("disposition", "Disposition", 180),
+            ("code", "Reason Code", 200),
+            ("impact", "Impact", 130),
+            ("impact_reason", "Impact Reason", 170),
+            ("change_code", "Change Code", 160),
+        )
+        for key, label, width in _disp_cols:
+            self._change_disposition_reasons_tree.heading(key, text=label)
+            self._change_disposition_reasons_tree.column(key, width=width, stretch=True)
+        self._change_disposition_reasons_tree.grid(
+            row=1, column=0, columnspan=2, sticky="nsew", pady=(6, 0)
+        )
+
+    def _build_approval_readiness_frame(self, main: Any) -> None:
+        ttk = self._ttk
+        frame = ttk.Labelframe(main, text="Approval Readiness", padding=8)
+        frame.grid(row=19, column=0, sticky="ew", pady=(8, 0))
+        frame.columnconfigure(1, weight=1)
+        ttk.Button(
+            frame,
+            text="Evaluate Approval Readiness",
+            command=self._run_approval_readiness,
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Label(
+            frame,
+            textvariable=self._approval_readiness_status,
+            font=("", 10, "bold"),
+        ).grid(row=0, column=1, sticky="w")
+        self._approval_readiness_reasons_tree = ttk.Treeview(
+            frame,
+            columns=("status", "code", "source_disposition", "source_code"),
+            show="headings",
+            height=4,
+        )
+        _ready_cols = (
+            ("status", "Status", 130),
+            ("code", "Readiness Code", 220),
+            ("source_disposition", "Source Disposition", 180),
+            ("source_code", "Source Reason Code", 200),
+        )
+        for key, label, width in _ready_cols:
+            self._approval_readiness_reasons_tree.heading(key, text=label)
+            self._approval_readiness_reasons_tree.column(
+                key, width=width, stretch=True
+            )
+        self._approval_readiness_reasons_tree.grid(
+            row=1, column=0, columnspan=2, sticky="nsew", pady=(6, 0)
+        )
+
+    def _run_change_disposition(self) -> None:
+        self._guard(lambda: self._run_change_disposition_impl())
+
+    def _run_change_disposition_impl(self) -> None:
+        self._session.run_change_disposition()
+        self._refresh_change_governance()
+
+    def _run_approval_readiness(self) -> None:
+        self._guard(lambda: self._run_approval_readiness_impl())
+
+    def _run_approval_readiness_impl(self) -> None:
+        self._session.run_approval_readiness()
+        self._refresh_change_governance()
+
+    def _refresh_change_governance(self) -> None:
+        """Keep Change Disposition and Approval Readiness panels in step."""
+        self._change_disposition_status.set(
+            self._session.change_disposition_status_text
+        )
+        self._approval_readiness_status.set(
+            self._session.approval_readiness_status_text
+        )
+        dtree = self._change_disposition_reasons_tree
+        if dtree is not None:
+            for row_id in dtree.get_children():
+                dtree.delete(row_id)
+            for row in self._session.change_disposition_reasons_rows():
+                dtree.insert("", "end", values=(
+                    str(row["disposition"]), str(row["code"]),
+                    str(row["impact"]), str(row["impact_reason"]),
+                    str(row["change_code"]),
+                ))
+        rtree = self._approval_readiness_reasons_tree
+        if rtree is not None:
+            for row_id in rtree.get_children():
+                rtree.delete(row_id)
+            for row in self._session.approval_readiness_reasons_rows():
+                rtree.insert("", "end", values=(
+                    str(row["status"]), str(row["code"]),
+                    str(row["source_disposition"]), str(row["source_code"]),
                 ))
 
     def _guard(self, action: Callable[[], Any]) -> None:

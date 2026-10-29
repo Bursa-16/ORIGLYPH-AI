@@ -10,6 +10,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from .acceptance_record import AuditAcceptanceDecision
 from .allocation import validate_allocation as _stage15_validate_allocation
 from .approval_readiness import (
     AuditApprovalReadinessResult,
@@ -105,8 +106,10 @@ __all__ = [
     "TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2",
     "TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3",
     "TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4",
+    "TOLERANCE_WORKSPACE_SCHEMA_VERSION_V5",
     "AnalysisMode",
     "InvalidToleranceWorkspaceError",
+    "WorkspaceAcceptanceState",
     "WorkspaceAllocationEntry",
     "WorkspaceAllocationPlan",
     "WorkspaceAnalysisResult",
@@ -127,6 +130,7 @@ TOLERANCE_WORKSPACE_SCHEMA_VERSION = "origlyph.tolerance.workspace.v1"
 TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2 = "origlyph.tolerance.workspace.v2"
 TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3 = "origlyph.tolerance.workspace.v3"
 TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4 = "origlyph.tolerance.workspace.v4"
+TOLERANCE_WORKSPACE_SCHEMA_VERSION_V5 = "origlyph.tolerance.workspace.v5"
 _SUPPORTED_TOLERANCE_MODEL = "symmetric"
 _DEFAULT_SIGMA_MULTIPLIER = 1.0
 
@@ -410,18 +414,68 @@ class WorkspaceContributor:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class WorkspaceAcceptanceState:
+    """Minimum authoritative acceptance inputs for Stage 15U reconstruction
+    (Stage 20G.2).
+
+    Persists the externally supplied governance references required to reconstruct
+    an :class:`~origlyph.tolerance.AuditAcceptanceRecord` after project reload.
+
+    ``decision`` is the governed acceptance decision enum value.
+    ``authority_reference`` and ``decision_reference`` are user-supplied canonical
+    string references to external
+    governance documents.  ``handoff_id`` is the SHA-256 fingerprint of the acceptance
+    handoff package that this state was bound to; it is used to detect incompatibility
+    when the runtime governance chain is re-run after reload.
+
+    **Security boundary**: ``authority_reference`` is not identity authentication.
+    ``decision_reference`` is not a digital signature.  Persisted acceptance references
+    are governance references only.  They do not provide digital signatures, actor
+    authentication, authorization proof, certification, or regulatory approval.
+
+    This is a workspace-layer type.  The engine types ``AuditAcceptanceRecord`` and
+    ``ValidatedAuditAcceptanceRecord`` are never stored here.  The engine type is
+    reconstructed by the caller when needed.
+    """
+
+    decision: AuditAcceptanceDecision
+    authority_reference: str
+    decision_reference: str
+    handoff_id: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.decision, AuditAcceptanceDecision):
+            raise InvalidToleranceWorkspaceError(
+                "decision must be AuditAcceptanceDecision"
+            )
+        _require_text(self.authority_reference, field="authority_reference")
+        _require_text(self.decision_reference, field="decision_reference")
+        _require_sha(self.handoff_id, field="handoff_id")
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "decision": self.decision.value,
+            "authority_reference": self.authority_reference,
+            "decision_reference": self.decision_reference,
+            "handoff_id": self.handoff_id,
+        }
+
+
 def _validate_workspace_state_schema(
     schema_version: str,
     *,
     specification: object,
     allocation_plan: object,
     statistical_allocation_plan: object,
+    acceptance_state: object,
 ) -> None:
     _v1 = TOLERANCE_WORKSPACE_SCHEMA_VERSION
     _v2 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2
     _v3 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3
     _v4 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4
-    if schema_version not in (_v1, _v2, _v3, _v4):
+    _v5 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V5
+    if schema_version not in (_v1, _v2, _v3, _v4, _v5):
         raise InvalidToleranceWorkspaceError(
             f"unsupported workspace schema {schema_version!r}"
         )
@@ -437,6 +491,11 @@ def _validate_workspace_state_schema(
         raise InvalidToleranceWorkspaceError(
             f"workspace {schema_version} does not support "
             "statistical_allocation_plan; use v4"
+        )
+    if schema_version in (_v1, _v2, _v3, _v4) and acceptance_state is not None:
+        raise InvalidToleranceWorkspaceError(
+            f"workspace {schema_version} does not support "
+            "acceptance_state; use v5"
         )
     if specification is not None and not isinstance(
         specification, WorkspaceSpecification
@@ -457,6 +516,12 @@ def _validate_workspace_state_schema(
             "statistical_allocation_plan must be "
             "WorkspaceStatisticalAllocationPlan or None"
         )
+    if acceptance_state is not None and not isinstance(
+        acceptance_state, WorkspaceAcceptanceState
+    ):
+        raise InvalidToleranceWorkspaceError(
+            "acceptance_state must be WorkspaceAcceptanceState or None"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -472,10 +537,13 @@ class WorkspaceState:
       optional worst-case allocation plan)
     * :data:`TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4` (v4, optional specification,
       optional worst-case allocation plan, optional statistical allocation plan)
+    * :data:`TOLERANCE_WORKSPACE_SCHEMA_VERSION_V5` (v5, all v4 fields plus
+      optional acceptance state for Stage 15U reconstruction)
 
     V1 states always have ``specification=None`` and ``allocation_plan=None``.
     V2 states always have ``allocation_plan=None``.
     V1/V2/V3 states always have ``statistical_allocation_plan=None``.
+    V1/V2/V3/V4 states always have ``acceptance_state=None``.
     """
 
     schema_version: str
@@ -485,6 +553,7 @@ class WorkspaceState:
     specification: WorkspaceSpecification | None = None
     allocation_plan: WorkspaceAllocationPlan | None = None
     statistical_allocation_plan: WorkspaceStatisticalAllocationPlan | None = None
+    acceptance_state: WorkspaceAcceptanceState | None = None
 
     def __post_init__(self) -> None:
         _validate_workspace_state_schema(
@@ -492,6 +561,7 @@ class WorkspaceState:
             specification=self.specification,
             allocation_plan=self.allocation_plan,
             statistical_allocation_plan=self.statistical_allocation_plan,
+            acceptance_state=self.acceptance_state,
         )
         _require_text(self.chain_name, field="chain_name")
         object.__setattr__(
@@ -521,25 +591,33 @@ class WorkspaceState:
         _v2 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2
         _v3 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3
         _v4 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4
-        if self.schema_version in (_v2, _v3, _v4):
+        _v5 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V5
+        if self.schema_version in (_v2, _v3, _v4, _v5):
             spec_dict: object = (
                 self.specification.as_dict() if self.specification is not None else None
             )
             base["specification"] = spec_dict
-        if self.schema_version in (_v3, _v4):
+        if self.schema_version in (_v3, _v4, _v5):
             plan_dict: object = (
                 self.allocation_plan.as_dict()
                 if self.allocation_plan is not None
                 else None
             )
             base["allocation_plan"] = plan_dict
-        if self.schema_version == _v4:
+        if self.schema_version in (_v4, _v5):
             stat_plan_dict: object = (
                 self.statistical_allocation_plan.as_dict()
                 if self.statistical_allocation_plan is not None
                 else None
             )
             base["statistical_allocation_plan"] = stat_plan_dict
+        if self.schema_version == _v5:
+            acc_dict: object = (
+                self.acceptance_state.as_dict()
+                if self.acceptance_state is not None
+                else None
+            )
+            base["acceptance_state"] = acc_dict
         return base
 
 
@@ -819,12 +897,14 @@ class ToleranceWorkspaceController:
         _v2 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2
         _v3 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3
         _v4 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4
+        _v5 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V5
         current = self._state.schema_version
         if specification is not None:
-            # Preserve v3/v4 if already there; they carry allocation plan or
-            # statistical allocation plan and cannot be downgraded to v2.
-            new_schema = current if current in (_v3, _v4) else _v2
-        elif current in (_v2, _v3, _v4):
+            # Preserve v3/v4/v5 if already there; they carry allocation plan,
+            # statistical allocation plan, or acceptance state that cannot be
+            # downgraded below their introducing schema version.
+            new_schema = current if current in (_v3, _v4, _v5) else _v2
+        elif current in (_v2, _v3, _v4, _v5):
             new_schema = current
         else:
             # v1 → clearing already-None spec: genuine no-op (guarded above).
@@ -1468,10 +1548,12 @@ class ToleranceWorkspaceController:
         current_schema = self._state.schema_version
         _v3 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V3
         _v4 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4
+        _v5 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V5
         if plan is not None:
-            # Preserve v4 if already there; it carries statistical_allocation_plan.
-            new_schema = _v4 if current_schema == _v4 else _v3
-        elif current_schema in (_v3, _v4):
+            # Preserve v4/v5 if already there; they carry statistical_allocation_plan
+            # or acceptance_state that cannot be downgraded.
+            new_schema = current_schema if current_schema in (_v4, _v5) else _v3
+        elif current_schema in (_v3, _v4, _v5):
             new_schema = current_schema
         else:
             # v1 or v2, clearing already-None plan: guarded above (no-op).
@@ -1517,10 +1599,12 @@ class ToleranceWorkspaceController:
             return
         current_schema = self._state.schema_version
         _v4 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4
+        _v5 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V5
         if plan is not None:
-            new_schema = _v4
-        elif current_schema == _v4:
-            new_schema = _v4
+            # Preserve v5 if already there; it carries acceptance_state.
+            new_schema = _v5 if current_schema == _v5 else _v4
+        elif current_schema in (_v4, _v5):
+            new_schema = current_schema
         else:
             # v1/v2/v3, clearing already-None plan: guarded above (no-op).
             return  # pragma: no cover
@@ -1537,6 +1621,53 @@ class ToleranceWorkspaceController:
         Equivalent to ``set_statistical_allocation_plan(None)``.
         """
         self.set_statistical_allocation_plan(None)
+
+    @property
+    def acceptance_state(self) -> WorkspaceAcceptanceState | None:
+        return self._state.acceptance_state
+
+    def set_acceptance_state(
+        self, state: WorkspaceAcceptanceState | None
+    ) -> None:
+        """Set or clear the authoritative acceptance state (Stage 20G.2).
+
+        A change upgrades the workspace schema to v5 and records the acceptance
+        inputs as authoritative engineering state.  Setting the same state is a
+        no-op.  Clearing (``state=None``) on a v5 workspace keeps v5 — no
+        downgrade occurs, consistent with prior schema evolution precedent.
+
+        This method carries the acceptance state into workspace state only.  It
+        does not run the Stage 15U validation; that is a future stage.
+
+        **Stale policy**: authoritative acceptance inputs are NOT silently
+        cleared when upstream engineering state changes.  Incompatibility with
+        the current runtime governance chain is detected at validation time.
+        """
+        if state is not None and not isinstance(state, WorkspaceAcceptanceState):
+            raise InvalidToleranceWorkspaceError(
+                "acceptance_state must be WorkspaceAcceptanceState or None"
+            )
+        if state == self._state.acceptance_state:
+            return
+        current_schema = self._state.schema_version
+        _v5 = TOLERANCE_WORKSPACE_SCHEMA_VERSION_V5
+        if state is not None:
+            new_schema = _v5
+        elif current_schema == _v5:
+            new_schema = _v5
+        else:
+            # v1/v2/v3/v4, clearing already-None state: guarded above (no-op).
+            return  # pragma: no cover
+        self._state = replace(
+            self._state, schema_version=new_schema, acceptance_state=state
+        )
+
+    def clear_acceptance_state(self) -> None:
+        """Clear the authoritative acceptance state (Stage 20G.2).
+
+        Equivalent to ``set_acceptance_state(None)``.
+        """
+        self.set_acceptance_state(None)
 
     def run_statistical_reconciliation(
         self,
@@ -1666,6 +1797,8 @@ def workspace_state_from_snapshot(snapshot: object) -> WorkspaceState:
         return _workspace_state_v3_from_dict(data)
     elif raw_schema == TOLERANCE_WORKSPACE_SCHEMA_VERSION_V4:
         return _workspace_state_v4_from_dict(data)
+    elif raw_schema == TOLERANCE_WORKSPACE_SCHEMA_VERSION_V5:
+        return _workspace_state_v5_from_dict(data)
     else:
         raise InvalidToleranceWorkspaceError(
             f"unsupported workspace schema {raw_schema!r}"
@@ -1940,6 +2073,105 @@ def _workspace_statistical_allocation_plan_from_dict(
             _workspace_statistical_allocation_entry_from_dict(e) for e in raw_entries
         ),
         allowed_combined_sigma=allowed_combined_sigma,
+    )
+
+
+def _workspace_state_v5_from_dict(data: dict[str, Any]) -> WorkspaceState:
+    _require_exact_keys(
+        data,
+        {
+            "schema_version", "chain_name", "analysis_mode",
+            "contributors", "specification", "allocation_plan",
+            "statistical_allocation_plan", "acceptance_state",
+        },
+        field="workspace snapshot v5",
+    )
+    raw_contributors = data["contributors"]
+    if not isinstance(raw_contributors, list):
+        raise InvalidToleranceWorkspaceError("contributors must be a list")
+    raw_spec = data["specification"]
+    if raw_spec is None:
+        specification = None
+    elif isinstance(raw_spec, dict):
+        specification = _workspace_specification_from_dict(raw_spec)
+    else:
+        raise InvalidToleranceWorkspaceError(
+            "workspace specification must be a dict or null"
+        )
+    raw_plan = data["allocation_plan"]
+    if raw_plan is None:
+        allocation_plan = None
+    elif isinstance(raw_plan, dict):
+        allocation_plan = _workspace_allocation_plan_from_dict(raw_plan)
+    else:
+        raise InvalidToleranceWorkspaceError(
+            "workspace allocation_plan must be a dict or null"
+        )
+    raw_stat_plan = data["statistical_allocation_plan"]
+    if raw_stat_plan is None:
+        statistical_allocation_plan = None
+    elif isinstance(raw_stat_plan, dict):
+        statistical_allocation_plan = _workspace_statistical_allocation_plan_from_dict(
+            raw_stat_plan
+        )
+    else:
+        raise InvalidToleranceWorkspaceError(
+            "workspace statistical_allocation_plan must be a dict or null"
+        )
+    raw_acc = data["acceptance_state"]
+    if raw_acc is None:
+        acceptance_state = None
+    elif isinstance(raw_acc, dict):
+        acceptance_state = _workspace_acceptance_state_from_dict(raw_acc)
+    else:
+        raise InvalidToleranceWorkspaceError(
+            "workspace acceptance_state must be a dict or null"
+        )
+    return WorkspaceState(
+        schema_version=data["schema_version"],
+        chain_name=_require_text(data["chain_name"], field="chain_name"),
+        analysis_mode=_coerce_analysis_mode(data["analysis_mode"]),
+        contributors=tuple(
+            _contributor_from_snapshot(item) for item in raw_contributors
+        ),
+        specification=specification,
+        allocation_plan=allocation_plan,
+        statistical_allocation_plan=statistical_allocation_plan,
+        acceptance_state=acceptance_state,
+    )
+
+
+def _workspace_acceptance_state_from_dict(data: object) -> WorkspaceAcceptanceState:
+    d = _require_dict(data, field="workspace acceptance state")
+    _require_exact_keys(
+        d,
+        {"decision", "authority_reference", "decision_reference", "handoff_id"},
+        field="workspace acceptance state",
+    )
+    return WorkspaceAcceptanceState(
+        decision=_coerce_acceptance_decision(d["decision"]),
+        authority_reference=_require_text(
+            d["authority_reference"], field="authority_reference"
+        ),
+        decision_reference=_require_text(
+            d["decision_reference"], field="decision_reference"
+        ),
+        handoff_id=_require_sha(d["handoff_id"], field="handoff_id"),
+    )
+
+
+def _coerce_acceptance_decision(value: object) -> AuditAcceptanceDecision:
+    if isinstance(value, AuditAcceptanceDecision):
+        return value
+    if isinstance(value, str):
+        try:
+            return AuditAcceptanceDecision(value)
+        except ValueError as exc:
+            raise InvalidToleranceWorkspaceError(
+                f"unsupported acceptance decision {value!r}"
+            ) from exc
+    raise InvalidToleranceWorkspaceError(
+        "decision must be AuditAcceptanceDecision or string"
     )
 
 

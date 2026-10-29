@@ -7,6 +7,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .acceptance_handoff import (
+    AuditAcceptanceHandoffPackage,
+)
+from .acceptance_record import (
+    AuditAcceptanceDecision,
+    ValidatedAuditAcceptanceRecord,
+)
 from .approval_readiness import (
     AuditApprovalReadinessResult,
 )
@@ -48,6 +55,7 @@ from .workspace_controller import (
     AnalysisMode,
     InvalidToleranceWorkspaceError,
     ToleranceWorkspaceController,
+    WorkspaceAcceptanceState,
     WorkspaceAllocationEntry,
     WorkspaceAllocationPlan,
     WorkspaceAnalysisResult,
@@ -72,6 +80,8 @@ _NO_COMPARISON_TEXT = "NOT LOADED"
 _NO_CHANGE_IMPACT_TEXT = "NOT EVALUATED"
 _NO_CHANGE_DISPOSITION_TEXT = "NOT DETERMINED"
 _NO_APPROVAL_READINESS_TEXT = "NOT EVALUATED"
+_NO_ACCEPTANCE_HANDOFF_TEXT = "NOT PREPARED"
+_NO_ACCEPTANCE_RECORD_TEXT = "NOT BUILT"
 _MODE_DISPLAY_NAMES: dict[str, str] = {
     "worst_case": "Worst Case",
     "rss_statistical": "RSS Statistical",
@@ -197,6 +207,10 @@ class WorkspaceSession:
         self.stat_allocation_budget: str = ""
         self._stat_allocation_sigmas: dict[str, str] = {}
         self.load_statistical_allocation_plan_fields()
+        self.acceptance_decision: str = ""
+        self.acceptance_authority_reference: str = ""
+        self.acceptance_decision_reference: str = ""
+        self.load_acceptance_fields()
 
     @property
     def result_text(self) -> str:
@@ -457,6 +471,133 @@ class WorkspaceSession:
         self.stat_sigma_multiplier = ""
         self.stat_allocation_budget = ""
         self._stat_allocation_sigmas = {}
+
+    # --- Governed Acceptance + Acceptance Record (Stage 20G.3) ---
+
+    def load_acceptance_fields(self) -> None:
+        """Populate transient acceptance editor fields from the persisted state."""
+        acc = self.controller.acceptance_state
+        if acc is None:
+            self.acceptance_decision = ""
+            self.acceptance_authority_reference = ""
+            self.acceptance_decision_reference = ""
+        else:
+            self.acceptance_decision = acc.decision.value
+            self.acceptance_authority_reference = acc.authority_reference
+            self.acceptance_decision_reference = acc.decision_reference
+
+    def sync_acceptance_state(self) -> None:
+        """Parse transient acceptance fields and push to the controller (Stage 20G.2).
+
+        Requires a current acceptance handoff to supply the ``handoff_id``.
+        Fail-closed: raises on blank decision, invalid decision value, blank or
+        leading/trailing-whitespace references, or absent handoff.
+        Does not call :meth:`run_acceptance_record`.
+        """
+        handoff = self.controller.last_acceptance_handoff
+        if handoff is None:
+            raise InvalidToleranceWorkspaceError(
+                "Prepare Acceptance Handoff first to obtain a handoff_id."
+            )
+        decision_str = self.acceptance_decision.strip()
+        if not decision_str:
+            raise InvalidToleranceWorkspaceError(
+                "Acceptance decision is required."
+            )
+        try:
+            decision = AuditAcceptanceDecision(decision_str)
+        except ValueError as exc:
+            valid = ", ".join(d.value for d in AuditAcceptanceDecision)
+            raise InvalidToleranceWorkspaceError(
+                f"Invalid acceptance decision {decision_str!r}. "
+                f"Valid values: {valid}."
+            ) from exc
+        authority = self.acceptance_authority_reference
+        if not authority or not authority.strip():
+            raise InvalidToleranceWorkspaceError(
+                "Authority reference is required."
+            )
+        if authority != authority.strip():
+            raise InvalidToleranceWorkspaceError(
+                "Authority reference must not have leading or trailing whitespace."
+            )
+        reference = self.acceptance_decision_reference
+        if not reference or not reference.strip():
+            raise InvalidToleranceWorkspaceError(
+                "Decision reference is required."
+            )
+        if reference != reference.strip():
+            raise InvalidToleranceWorkspaceError(
+                "Decision reference must not have leading or trailing whitespace."
+            )
+        state = WorkspaceAcceptanceState(
+            decision=decision,
+            authority_reference=authority,
+            decision_reference=reference,
+            handoff_id=handoff.handoff_id,
+        )
+        self.controller.set_acceptance_state(state)
+
+    def clear_acceptance_state(self) -> None:
+        """Clear acceptance inputs from the controller and transient editor fields."""
+        self.controller.clear_acceptance_state()
+        self.acceptance_decision = ""
+        self.acceptance_authority_reference = ""
+        self.acceptance_decision_reference = ""
+
+    def prepare_acceptance_handoff(self) -> AuditAcceptanceHandoffPackage:
+        """Delegate acceptance handoff preparation to the controller (Stage 15T)."""
+        return self.controller.run_acceptance_handoff()
+
+    def build_acceptance_record(self) -> ValidatedAuditAcceptanceRecord:
+        """Delegate acceptance record validation to the controller (Stage 15U)."""
+        return self.controller.run_acceptance_record()
+
+    @property
+    def last_acceptance_handoff(self) -> AuditAcceptanceHandoffPackage | None:
+        """Current acceptance handoff; None before Prepare Acceptance Handoff."""
+        return self.controller.last_acceptance_handoff
+
+    @property
+    def last_acceptance_record(self) -> ValidatedAuditAcceptanceRecord | None:
+        """Current validated acceptance record; None before Build Acceptance Record."""
+        return self.controller.last_acceptance_record
+
+    @property
+    def acceptance_handoff_status_text(self) -> str:
+        """Presentation text for the current acceptance handoff state."""
+        handoff = self.controller.last_acceptance_handoff
+        if handoff is None:
+            return _NO_ACCEPTANCE_HANDOFF_TEXT
+        return handoff.status.value.upper()
+
+    @property
+    def acceptance_handoff_detail_text(self) -> str:
+        """Short detail line for the acceptance handoff; empty when not prepared."""
+        handoff = self.controller.last_acceptance_handoff
+        if handoff is None:
+            return ""
+        return f"Handoff ID: {handoff.handoff_id[:16]}…"
+
+    @property
+    def acceptance_record_status_text(self) -> str:
+        """Presentation text for the current acceptance record state."""
+        record = self.controller.last_acceptance_record
+        if record is None:
+            return _NO_ACCEPTANCE_RECORD_TEXT
+        return record.decision.value.upper()
+
+    @property
+    def acceptance_record_detail_text(self) -> str:
+        """Compact detail line for the acceptance record; empty when not built."""
+        record = self.controller.last_acceptance_record
+        if record is None:
+            return ""
+        return (
+            f"Decision: {record.decision.value}  "
+            f"Authority: {record.authority_reference}  "
+            f"Reference: {record.decision_reference}"
+        )
 
     def statistical_allocation_editor_rows(self) -> list[dict[str, object]]:
         """Rows for the statistical plan editor table; one per current contributor."""
@@ -1138,6 +1279,23 @@ class ToleranceWorkspaceView:
         )
         self._change_disposition_reasons_tree: Any = None
         self._approval_readiness_reasons_tree: Any = None
+        self._acceptance_handoff_status = tk.StringVar(
+            value=_NO_ACCEPTANCE_HANDOFF_TEXT
+        )
+        self._acceptance_handoff_detail = tk.StringVar(value="")
+        self._acceptance_record_status = tk.StringVar(
+            value=_NO_ACCEPTANCE_RECORD_TEXT
+        )
+        self._acceptance_record_detail = tk.StringVar(value="")
+        self._acceptance_decision_var = tk.StringVar(
+            value=self._session.acceptance_decision
+        )
+        self._acceptance_authority_var = tk.StringVar(
+            value=self._session.acceptance_authority_reference
+        )
+        self._acceptance_decision_ref_var = tk.StringVar(
+            value=self._session.acceptance_decision_reference
+        )
         self._build()
         self._refresh_rows()
         self._refresh_allocation_plan()
@@ -1150,6 +1308,7 @@ class ToleranceWorkspaceView:
         self._refresh_audit()
         self._refresh_comparison()
         self._refresh_change_governance()
+        self._refresh_acceptance()
 
     @property
     def controller(self) -> ToleranceWorkspaceController:
@@ -1512,9 +1671,11 @@ class ToleranceWorkspaceView:
         self._build_change_impact_frame(main)
         self._build_change_disposition_frame(main)
         self._build_approval_readiness_frame(main)
+        self._build_governed_acceptance_frame(main)
+        self._build_acceptance_record_frame(main)
 
         storage = ttk.Labelframe(main, text="Project File", padding=8)
-        storage.grid(row=20, column=0, sticky="ew", pady=(8, 0))
+        storage.grid(row=22, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(storage, text="Open Project", command=self._open).pack(side="left")
         ttk.Button(storage, text="Save Project", command=self._save).pack(
             side="left", padx=(8, 0)
@@ -1795,8 +1956,17 @@ class ToleranceWorkspaceView:
         self._stat_alloc_budget_var.set(self._session.stat_allocation_budget)
         self._stat_alloc_sigma_entry_var.set("")
         self._stat_alloc_selected_id = None
+        self._session.load_acceptance_fields()
+        self._acceptance_decision_var.set(self._session.acceptance_decision)
+        self._acceptance_authority_var.set(
+            self._session.acceptance_authority_reference
+        )
+        self._acceptance_decision_ref_var.set(
+            self._session.acceptance_decision_reference
+        )
         self._refresh_rows()
         self._refresh_result()
+        self._refresh_acceptance()
 
     def _save(self) -> None:
         self._guard(lambda: self._save_impl())
@@ -2536,6 +2706,84 @@ class ToleranceWorkspaceView:
             row=1, column=0, columnspan=2, sticky="nsew", pady=(6, 0)
         )
 
+    def _build_governed_acceptance_frame(self, main: Any) -> None:
+        ttk = self._ttk
+        frame = ttk.Labelframe(main, text="Governed Acceptance", padding=8)
+        frame.grid(row=20, column=0, sticky="ew", pady=(8, 0))
+        frame.columnconfigure(1, weight=1)
+
+        ttk.Button(
+            frame,
+            text="Prepare Acceptance Handoff",
+            command=self._prepare_acceptance_handoff,
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Label(
+            frame,
+            textvariable=self._acceptance_handoff_status,
+            font=("", 10, "bold"),
+        ).grid(row=0, column=1, sticky="w")
+        ttk.Label(
+            frame,
+            textvariable=self._acceptance_handoff_detail,
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 8))
+
+        ttk.Label(frame, text="Decision").grid(row=2, column=0, sticky="w")
+        decision_cb = ttk.Combobox(
+            frame,
+            textvariable=self._acceptance_decision_var,
+            values=[d.value for d in AuditAcceptanceDecision],
+            state="readonly",
+            width=28,
+        )
+        decision_cb.grid(row=2, column=1, sticky="w", padx=(4, 0))
+
+        ttk.Label(frame, text="Authority Reference").grid(
+            row=3, column=0, sticky="w", pady=(4, 0)
+        )
+        ttk.Entry(frame, textvariable=self._acceptance_authority_var).grid(
+            row=3, column=1, sticky="ew", padx=(4, 0), pady=(4, 0)
+        )
+
+        ttk.Label(frame, text="Decision Reference").grid(
+            row=4, column=0, sticky="w", pady=(4, 0)
+        )
+        ttk.Entry(frame, textvariable=self._acceptance_decision_ref_var).grid(
+            row=4, column=1, sticky="ew", padx=(4, 0), pady=(4, 0)
+        )
+
+        btn_row = ttk.Frame(frame)
+        btn_row.grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Button(
+            btn_row,
+            text="Save Acceptance Inputs",
+            command=self._sync_acceptance_state,
+        ).pack(side="left")
+        ttk.Button(
+            btn_row,
+            text="Clear Acceptance Inputs",
+            command=self._clear_acceptance_state,
+        ).pack(side="left", padx=(8, 0))
+
+    def _build_acceptance_record_frame(self, main: Any) -> None:
+        ttk = self._ttk
+        frame = ttk.Labelframe(main, text="Acceptance Record", padding=8)
+        frame.grid(row=21, column=0, sticky="ew", pady=(8, 0))
+        frame.columnconfigure(1, weight=1)
+        ttk.Button(
+            frame,
+            text="Build Acceptance Record",
+            command=self._build_acceptance_record,
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Label(
+            frame,
+            textvariable=self._acceptance_record_status,
+            font=("", 10, "bold"),
+        ).grid(row=0, column=1, sticky="w")
+        ttk.Label(
+            frame,
+            textvariable=self._acceptance_record_detail,
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
+
     def _run_change_disposition(self) -> None:
         self._guard(lambda: self._run_change_disposition_impl())
 
@@ -2577,6 +2825,60 @@ class ToleranceWorkspaceView:
                     str(row["status"]), str(row["code"]),
                     str(row["source_disposition"]), str(row["source_code"]),
                 ))
+        self._refresh_acceptance()
+
+    def _prepare_acceptance_handoff(self) -> None:
+        self._guard(lambda: self._prepare_acceptance_handoff_impl())
+
+    def _prepare_acceptance_handoff_impl(self) -> None:
+        self._session.prepare_acceptance_handoff()
+        self._refresh_acceptance()
+
+    def _sync_acceptance_state(self) -> None:
+        self._guard(lambda: self._sync_acceptance_state_impl())
+
+    def _sync_acceptance_state_impl(self) -> None:
+        self._session.acceptance_decision = self._acceptance_decision_var.get()
+        self._session.acceptance_authority_reference = (
+            self._acceptance_authority_var.get()
+        )
+        self._session.acceptance_decision_reference = (
+            self._acceptance_decision_ref_var.get()
+        )
+        self._session.sync_acceptance_state()
+        self._refresh_acceptance()
+
+    def _clear_acceptance_state(self) -> None:
+        self._guard(lambda: self._clear_acceptance_state_impl())
+
+    def _clear_acceptance_state_impl(self) -> None:
+        self._session.clear_acceptance_state()
+        self._acceptance_decision_var.set("")
+        self._acceptance_authority_var.set("")
+        self._acceptance_decision_ref_var.set("")
+        self._refresh_acceptance()
+
+    def _build_acceptance_record(self) -> None:
+        self._guard(lambda: self._build_acceptance_record_impl())
+
+    def _build_acceptance_record_impl(self) -> None:
+        self._session.build_acceptance_record()
+        self._refresh_acceptance()
+
+    def _refresh_acceptance(self) -> None:
+        """Keep Governed Acceptance and Acceptance Record panels in step."""
+        self._acceptance_handoff_status.set(
+            self._session.acceptance_handoff_status_text
+        )
+        self._acceptance_handoff_detail.set(
+            self._session.acceptance_handoff_detail_text
+        )
+        self._acceptance_record_status.set(
+            self._session.acceptance_record_status_text
+        )
+        self._acceptance_record_detail.set(
+            self._session.acceptance_record_detail_text
+        )
 
     def _guard(self, action: Callable[[], Any]) -> None:
         try:

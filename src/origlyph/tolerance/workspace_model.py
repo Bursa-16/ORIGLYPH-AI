@@ -7,12 +7,18 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .acceptance_closure import (
+    AuditAcceptanceClosureManifest,
+)
 from .acceptance_handoff import (
     AuditAcceptanceHandoffPackage,
 )
 from .acceptance_record import (
     AuditAcceptanceDecision,
     ValidatedAuditAcceptanceRecord,
+)
+from .acceptance_verification import (
+    AuditAcceptanceVerificationEnvelope,
 )
 from .approval_readiness import (
     AuditApprovalReadinessResult,
@@ -82,6 +88,8 @@ _NO_CHANGE_DISPOSITION_TEXT = "NOT DETERMINED"
 _NO_APPROVAL_READINESS_TEXT = "NOT EVALUATED"
 _NO_ACCEPTANCE_HANDOFF_TEXT = "NOT PREPARED"
 _NO_ACCEPTANCE_RECORD_TEXT = "NOT BUILT"
+_NO_ACCEPTANCE_VERIFICATION_TEXT = "NOT VERIFIED"
+_NO_ACCEPTANCE_CLOSURE_TEXT = "NOT BUILT"
 _MODE_DISPLAY_NAMES: dict[str, str] = {
     "worst_case": "Worst Case",
     "rss_statistical": "RSS Statistical",
@@ -553,6 +561,14 @@ class WorkspaceSession:
         """Delegate acceptance record validation to the controller (Stage 15U)."""
         return self.controller.run_acceptance_record()
 
+    def run_acceptance_verification(self) -> AuditAcceptanceVerificationEnvelope:
+        """Delegate acceptance verification to the controller (Stage 15V)."""
+        return self.controller.run_acceptance_verification()
+
+    def run_acceptance_closure(self) -> AuditAcceptanceClosureManifest:
+        """Delegate closure manifest construction to the controller (Stage 15W)."""
+        return self.controller.run_acceptance_closure()
+
     @property
     def last_acceptance_handoff(self) -> AuditAcceptanceHandoffPackage | None:
         """Current acceptance handoff; None before Prepare Acceptance Handoff."""
@@ -597,6 +613,57 @@ class WorkspaceSession:
             f"Decision: {record.decision.value}  "
             f"Authority: {record.authority_reference}  "
             f"Reference: {record.decision_reference}"
+        )
+
+    @property
+    def last_acceptance_verification(
+        self,
+    ) -> AuditAcceptanceVerificationEnvelope | None:
+        """Current verification envelope; None before Verify Acceptance Record."""
+        return self.controller.last_acceptance_verification
+
+    @property
+    def last_acceptance_closure(self) -> AuditAcceptanceClosureManifest | None:
+        """Current closure manifest; None before Build Closure Manifest."""
+        return self.controller.last_acceptance_closure
+
+    @property
+    def acceptance_verification_status_text(self) -> str:
+        """Presentation text for the current acceptance verification state."""
+        envelope = self.controller.last_acceptance_verification
+        if envelope is None:
+            return _NO_ACCEPTANCE_VERIFICATION_TEXT
+        return envelope.status.value.upper()
+
+    @property
+    def acceptance_verification_detail_text(self) -> str:
+        """Short detail line for the verification envelope; empty when not verified."""
+        envelope = self.controller.last_acceptance_verification
+        if envelope is None:
+            return ""
+        facts_count = len(envelope.verification_facts)
+        return (
+            f"Envelope ID: {envelope.envelope_id[:16]}…  "
+            f"Facts: {facts_count}"
+        )
+
+    @property
+    def acceptance_closure_status_text(self) -> str:
+        """Presentation text for the current acceptance closure state."""
+        manifest = self.controller.last_acceptance_closure
+        if manifest is None:
+            return _NO_ACCEPTANCE_CLOSURE_TEXT
+        return manifest.status.value.upper()
+
+    @property
+    def acceptance_closure_detail_text(self) -> str:
+        """Short detail line for the closure manifest; empty when not built."""
+        manifest = self.controller.last_acceptance_closure
+        if manifest is None:
+            return ""
+        return (
+            f"Closure ID: {manifest.closure_id[:16]}…  "
+            f"Decision: {manifest.references.decision.value}"
         )
 
     def statistical_allocation_editor_rows(self) -> list[dict[str, object]]:
@@ -1296,6 +1363,14 @@ class ToleranceWorkspaceView:
         self._acceptance_decision_ref_var = tk.StringVar(
             value=self._session.acceptance_decision_reference
         )
+        self._acceptance_verification_status = tk.StringVar(
+            value=_NO_ACCEPTANCE_VERIFICATION_TEXT
+        )
+        self._acceptance_verification_detail = tk.StringVar(value="")
+        self._acceptance_closure_status = tk.StringVar(
+            value=_NO_ACCEPTANCE_CLOSURE_TEXT
+        )
+        self._acceptance_closure_detail = tk.StringVar(value="")
         self._build()
         self._refresh_rows()
         self._refresh_allocation_plan()
@@ -1309,6 +1384,7 @@ class ToleranceWorkspaceView:
         self._refresh_comparison()
         self._refresh_change_governance()
         self._refresh_acceptance()
+        self._refresh_acceptance_closure()
 
     @property
     def controller(self) -> ToleranceWorkspaceController:
@@ -1673,9 +1749,11 @@ class ToleranceWorkspaceView:
         self._build_approval_readiness_frame(main)
         self._build_governed_acceptance_frame(main)
         self._build_acceptance_record_frame(main)
+        self._build_acceptance_verification_frame(main)
+        self._build_acceptance_closure_frame(main)
 
         storage = ttk.Labelframe(main, text="Project File", padding=8)
-        storage.grid(row=22, column=0, sticky="ew", pady=(8, 0))
+        storage.grid(row=24, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(storage, text="Open Project", command=self._open).pack(side="left")
         ttk.Button(storage, text="Save Project", command=self._save).pack(
             side="left", padx=(8, 0)
@@ -1967,6 +2045,7 @@ class ToleranceWorkspaceView:
         self._refresh_rows()
         self._refresh_result()
         self._refresh_acceptance()
+        self._refresh_acceptance_closure()
 
     def _save(self) -> None:
         self._guard(lambda: self._save_impl())
@@ -2784,6 +2863,46 @@ class ToleranceWorkspaceView:
             textvariable=self._acceptance_record_detail,
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
+    def _build_acceptance_verification_frame(self, main: Any) -> None:
+        ttk = self._ttk
+        frame = ttk.Labelframe(main, text="Acceptance Verification", padding=8)
+        frame.grid(row=22, column=0, sticky="ew", pady=(8, 0))
+        frame.columnconfigure(1, weight=1)
+        ttk.Button(
+            frame,
+            text="Verify Acceptance Record",
+            command=self._verify_acceptance_record,
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Label(
+            frame,
+            textvariable=self._acceptance_verification_status,
+            font=("", 10, "bold"),
+        ).grid(row=0, column=1, sticky="w")
+        ttk.Label(
+            frame,
+            textvariable=self._acceptance_verification_detail,
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
+
+    def _build_acceptance_closure_frame(self, main: Any) -> None:
+        ttk = self._ttk
+        frame = ttk.Labelframe(main, text="Acceptance Closure", padding=8)
+        frame.grid(row=23, column=0, sticky="ew", pady=(8, 0))
+        frame.columnconfigure(1, weight=1)
+        ttk.Button(
+            frame,
+            text="Build Closure Manifest",
+            command=self._build_closure_manifest,
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Label(
+            frame,
+            textvariable=self._acceptance_closure_status,
+            font=("", 10, "bold"),
+        ).grid(row=0, column=1, sticky="w")
+        ttk.Label(
+            frame,
+            textvariable=self._acceptance_closure_detail,
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
+
     def _run_change_disposition(self) -> None:
         self._guard(lambda: self._run_change_disposition_impl())
 
@@ -2826,6 +2945,7 @@ class ToleranceWorkspaceView:
                     str(row["source_disposition"]), str(row["source_code"]),
                 ))
         self._refresh_acceptance()
+        self._refresh_acceptance_closure()
 
     def _prepare_acceptance_handoff(self) -> None:
         self._guard(lambda: self._prepare_acceptance_handoff_impl())
@@ -2833,6 +2953,7 @@ class ToleranceWorkspaceView:
     def _prepare_acceptance_handoff_impl(self) -> None:
         self._session.prepare_acceptance_handoff()
         self._refresh_acceptance()
+        self._refresh_acceptance_closure()
 
     def _sync_acceptance_state(self) -> None:
         self._guard(lambda: self._sync_acceptance_state_impl())
@@ -2847,6 +2968,7 @@ class ToleranceWorkspaceView:
         )
         self._session.sync_acceptance_state()
         self._refresh_acceptance()
+        self._refresh_acceptance_closure()
 
     def _clear_acceptance_state(self) -> None:
         self._guard(lambda: self._clear_acceptance_state_impl())
@@ -2857,6 +2979,7 @@ class ToleranceWorkspaceView:
         self._acceptance_authority_var.set("")
         self._acceptance_decision_ref_var.set("")
         self._refresh_acceptance()
+        self._refresh_acceptance_closure()
 
     def _build_acceptance_record(self) -> None:
         self._guard(lambda: self._build_acceptance_record_impl())
@@ -2864,6 +2987,7 @@ class ToleranceWorkspaceView:
     def _build_acceptance_record_impl(self) -> None:
         self._session.build_acceptance_record()
         self._refresh_acceptance()
+        self._refresh_acceptance_closure()
 
     def _refresh_acceptance(self) -> None:
         """Keep Governed Acceptance and Acceptance Record panels in step."""
@@ -2878,6 +3002,35 @@ class ToleranceWorkspaceView:
         )
         self._acceptance_record_detail.set(
             self._session.acceptance_record_detail_text
+        )
+
+    def _verify_acceptance_record(self) -> None:
+        self._guard(lambda: self._verify_acceptance_record_impl())
+
+    def _verify_acceptance_record_impl(self) -> None:
+        self._session.run_acceptance_verification()
+        self._refresh_acceptance_closure()
+
+    def _build_closure_manifest(self) -> None:
+        self._guard(lambda: self._build_closure_manifest_impl())
+
+    def _build_closure_manifest_impl(self) -> None:
+        self._session.run_acceptance_closure()
+        self._refresh_acceptance_closure()
+
+    def _refresh_acceptance_closure(self) -> None:
+        """Keep Acceptance Verification and Acceptance Closure panels in step."""
+        self._acceptance_verification_status.set(
+            self._session.acceptance_verification_status_text
+        )
+        self._acceptance_verification_detail.set(
+            self._session.acceptance_verification_detail_text
+        )
+        self._acceptance_closure_status.set(
+            self._session.acceptance_closure_status_text
+        )
+        self._acceptance_closure_detail.set(
+            self._session.acceptance_closure_detail_text
         )
 
     def _guard(self, action: Callable[[], Any]) -> None:

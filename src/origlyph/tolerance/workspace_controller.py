@@ -10,6 +10,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from .acceptance_closure import (
+    AuditAcceptanceClosureManifest,
+    InvalidAuditAcceptanceClosureError,
+)
+from .acceptance_closure import (
+    build_acceptance_closure_manifest as _build_acceptance_closure,
+)
 from .acceptance_handoff import (
     AuditAcceptanceHandoffPackage,
 )
@@ -25,6 +32,13 @@ from .acceptance_record import (
 )
 from .acceptance_record import (
     validate_audit_acceptance_record as _validate_acceptance_record,
+)
+from .acceptance_verification import (
+    AuditAcceptanceVerificationEnvelope,
+    InvalidAuditAcceptanceVerificationError,
+)
+from .acceptance_verification import (
+    build_acceptance_record_verification_envelope as _build_acceptance_verification,
 )
 from .allocation import validate_allocation as _stage15_validate_allocation
 from .approval_readiness import (
@@ -140,6 +154,8 @@ __all__ = [
     "workspace_state_to_snapshot",
     "workspace_summary_values",
     "InvalidAuditAcceptanceRecordError",
+    "InvalidAuditAcceptanceVerificationError",
+    "InvalidAuditAcceptanceClosureError",
 ]
 
 TOLERANCE_WORKSPACE_SCHEMA_VERSION = "origlyph.tolerance.workspace.v1"
@@ -700,6 +716,10 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness: AuditApprovalReadinessResult | None = None
         self._last_acceptance_handoff: AuditAcceptanceHandoffPackage | None = None
         self._last_acceptance_record: ValidatedAuditAcceptanceRecord | None = None
+        self._last_acceptance_verification: (
+            AuditAcceptanceVerificationEnvelope | None
+        ) = None
+        self._last_acceptance_closure: AuditAcceptanceClosureManifest | None = None
 
     @property
     def state(self) -> WorkspaceState:
@@ -798,6 +818,16 @@ class ToleranceWorkspaceController:
         return self._last_acceptance_record
 
     @property
+    def last_acceptance_verification(
+        self,
+    ) -> AuditAcceptanceVerificationEnvelope | None:
+        return self._last_acceptance_verification
+
+    @property
+    def last_acceptance_closure(self) -> AuditAcceptanceClosureManifest | None:
+        return self._last_acceptance_closure
+
+    @property
     def statistical_allocation_plan(self) -> WorkspaceStatisticalAllocationPlan | None:
         return self._state.statistical_allocation_plan
 
@@ -836,6 +866,8 @@ class ToleranceWorkspaceController:
         instance._last_approval_readiness = None
         instance._last_acceptance_handoff = None
         instance._last_acceptance_record = None
+        instance._last_acceptance_verification = None
+        instance._last_acceptance_closure = None
         return instance
 
     @classmethod
@@ -886,6 +918,8 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness = None
         self._last_acceptance_handoff = None
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
 
     def set_analysis_mode(self, analysis_mode: AnalysisMode | str) -> None:
         mode = _coerce_analysis_mode(analysis_mode)
@@ -907,6 +941,8 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness = None
         self._last_acceptance_handoff = None
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
 
     def set_specification(
         self, specification: WorkspaceSpecification | None
@@ -959,6 +995,8 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness = None
         self._last_acceptance_handoff = None
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
 
     def add_contributor(
         self,
@@ -1065,6 +1103,8 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness = None
         self._last_acceptance_handoff = None
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
         return result
 
     def result_view(self) -> dict[str, object]:
@@ -1130,6 +1170,8 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness = None
         self._last_acceptance_handoff = None
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
         return decision
 
     def run_decision_evidence(
@@ -1165,6 +1207,8 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness = None
         self._last_acceptance_handoff = None
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
         return bundle, explanation
 
     def run_decision_report(self) -> ToleranceDecisionReport:
@@ -1203,6 +1247,8 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness = None
         self._last_acceptance_handoff = None
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
         return report
 
     def run_audit_integrity(self) -> AuditIntegrityResult:
@@ -1233,6 +1279,8 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness = None
         self._last_acceptance_handoff = None
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
         return integrity
 
     def run_audit_package(self) -> ToleranceDecisionAuditPackage:
@@ -1265,6 +1313,8 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness = None
         self._last_acceptance_handoff = None
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
         return package
 
     def load_comparison_audit_package(
@@ -1295,6 +1345,8 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness = None
         self._last_acceptance_handoff = None
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
         return package
 
     def run_audit_comparison(self) -> AuditPackageComparisonResult:
@@ -1332,6 +1384,8 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness = None
         self._last_acceptance_handoff = None
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
         return result
 
     def run_change_impact(self) -> AuditChangeImpactResult:
@@ -1358,6 +1412,8 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness = None
         self._last_acceptance_handoff = None
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
         return impact
 
     def run_change_disposition(self) -> AuditChangeDispositionResult:
@@ -1383,6 +1439,8 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness = None
         self._last_acceptance_handoff = None
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
         return disposition
 
     def run_approval_readiness(self) -> AuditApprovalReadinessResult:
@@ -1407,6 +1465,8 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness = readiness
         self._last_acceptance_handoff = None
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
         return readiness
 
     def run_acceptance_handoff(self) -> AuditAcceptanceHandoffPackage:
@@ -1448,6 +1508,8 @@ class ToleranceWorkspaceController:
         )
         self._last_acceptance_handoff = handoff
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
         return handoff
 
     def run_acceptance_record(self) -> ValidatedAuditAcceptanceRecord:
@@ -1501,7 +1563,77 @@ class ToleranceWorkspaceController:
             self._last_acceptance_handoff, record
         )
         self._last_acceptance_record = validated
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
         return validated
+
+    def run_acceptance_verification(self) -> AuditAcceptanceVerificationEnvelope:
+        """Build a deterministic structural verification envelope (Stage 15V).
+
+        Delegates to
+        :func:`~origlyph.tolerance.acceptance_verification.\
+build_acceptance_record_verification_envelope`.
+        Requires a valid acceptance handoff and a valid validated acceptance
+        record.  Result is runtime-derived; it is not persisted and does not
+        affect project identity.
+
+        Fail-closed: raises when prerequisites are missing.  Call
+        :meth:`run_acceptance_handoff` and :meth:`run_acceptance_record` first.
+
+        This method packages deterministic structural facts only.  It does not
+        authenticate actors, create digital signatures, or validate authority.
+        """
+        if self._last_acceptance_handoff is None:
+            raise InvalidToleranceWorkspaceError(
+                "Prepare Acceptance Handoff first."
+            )
+        if self._last_acceptance_record is None:
+            raise InvalidToleranceWorkspaceError(
+                "Build Acceptance Record first."
+            )
+        envelope = _build_acceptance_verification(
+            self._last_acceptance_handoff,
+            self._last_acceptance_record,
+        )
+        self._last_acceptance_verification = envelope
+        self._last_acceptance_closure = None
+        return envelope
+
+    def run_acceptance_closure(self) -> AuditAcceptanceClosureManifest:
+        """Build the deterministic closure manifest for the acceptance chain (15W).
+
+        Delegates to
+        :func:`~origlyph.tolerance.acceptance_closure.build_acceptance_closure_manifest`.
+        Requires a valid acceptance handoff, accepted record, and verification
+        envelope.  Result is runtime-derived; it is not persisted and does not
+        affect project identity.
+
+        Fail-closed: raises when prerequisites are missing.  Call
+        :meth:`run_acceptance_verification` first.
+
+        This method closes the deterministic acceptance chain artifact chain.
+        It does not grant legal approval, issue a regulatory certificate, or
+        release the design for production.
+        """
+        if self._last_acceptance_handoff is None:
+            raise InvalidToleranceWorkspaceError(
+                "Prepare Acceptance Handoff first."
+            )
+        if self._last_acceptance_record is None:
+            raise InvalidToleranceWorkspaceError(
+                "Build Acceptance Record first."
+            )
+        if self._last_acceptance_verification is None:
+            raise InvalidToleranceWorkspaceError(
+                "Verify Acceptance Record first."
+            )
+        manifest = _build_acceptance_closure(
+            self._last_acceptance_handoff,
+            self._last_acceptance_record,
+            self._last_acceptance_verification,
+        )
+        self._last_acceptance_closure = manifest
+        return manifest
 
     def run_sensitivity(
         self,
@@ -1812,6 +1944,8 @@ class ToleranceWorkspaceController:
             self._state, schema_version=new_schema, acceptance_state=state
         )
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
 
     def clear_acceptance_state(self) -> None:
         """Clear the authoritative acceptance state (Stage 20G.2).
@@ -1903,6 +2037,8 @@ class ToleranceWorkspaceController:
         self._last_approval_readiness = None
         self._last_acceptance_handoff = None
         self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
 
     def _worst_case_stack(self) -> ToleranceStack:
         return ToleranceStack(

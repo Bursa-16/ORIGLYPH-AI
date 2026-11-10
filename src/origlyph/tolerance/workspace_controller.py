@@ -1366,6 +1366,58 @@ class ToleranceWorkspaceController:
             path=path,
         )
 
+    def export_unified_html_report(self, path: str | Path) -> Path:
+        """Export the unified engineering report as a deterministic HTML artifact.
+
+        Requires all ten artifacts already cached (decision report, audit package,
+        and all eight governance/acceptance chain artifacts).  Does not trigger any
+        generation.  Does not mutate workspace state or project identity.
+
+        Raises
+        ------
+        InvalidToleranceWorkspaceError
+            If any required artifact is missing.
+        """
+        missing = [
+            name
+            for name, value in [
+                ("last_decision_report", self._last_decision_report),
+                ("last_audit_package", self._last_audit_package),
+                ("last_audit_comparison", self._last_audit_comparison),
+                ("last_change_impact", self._last_change_impact),
+                ("last_change_disposition", self._last_change_disposition),
+                ("last_approval_readiness", self._last_approval_readiness),
+                ("last_acceptance_handoff", self._last_acceptance_handoff),
+                ("last_acceptance_record", self._last_acceptance_record),
+                (
+                    "last_acceptance_verification",
+                    self._last_acceptance_verification,
+                ),
+                ("last_acceptance_closure", self._last_acceptance_closure),
+            ]
+            if value is None
+        ]
+        if missing:
+            raise InvalidToleranceWorkspaceError(
+                "Unified HTML report export requires all ten engineering "
+                "artifacts to be present. "
+                f"Missing: {', '.join(missing)}."
+            )
+        from .unified_html_export import write_unified_engineering_report_html
+        return write_unified_engineering_report_html(
+            decision_report=self._last_decision_report,  # type: ignore[arg-type]
+            audit_package=self._last_audit_package,  # type: ignore[arg-type]
+            comparison=self._last_audit_comparison,  # type: ignore[arg-type]
+            change_impact=self._last_change_impact,  # type: ignore[arg-type]
+            disposition=self._last_change_disposition,  # type: ignore[arg-type]
+            approval_readiness=self._last_approval_readiness,  # type: ignore[arg-type]
+            acceptance_handoff=self._last_acceptance_handoff,  # type: ignore[arg-type]
+            acceptance_record=self._last_acceptance_record,  # type: ignore[arg-type]
+            acceptance_verification=self._last_acceptance_verification,  # type: ignore[arg-type]
+            acceptance_closure=self._last_acceptance_closure,  # type: ignore[arg-type]
+            path=path,
+        )
+
     def run_audit_integrity(self) -> AuditIntegrityResult:
         """Validate structural integrity of the decision report (Stage 15N).
 

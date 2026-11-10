@@ -259,6 +259,11 @@ from .sensitivity import (
 )
 from .statistical import statistical
 from .statistical_reconciliation import reconcile_statistical_allocation
+from .unified_html_export import (
+    UnifiedEngineeringHtmlExportError,
+    render_unified_engineering_report_html,
+    write_unified_engineering_report_html,
+)
 from .workspace_controller import (
     TOLERANCE_WORKSPACE_SCHEMA_VERSION,
     TOLERANCE_WORKSPACE_SCHEMA_VERSION_V2,
@@ -320,6 +325,7 @@ __all__ = [
     "AuditIntegrityViolationCode",
     "AuditPackageHtmlExportError",
     "GovernanceHtmlExportError",
+    "UnifiedEngineeringHtmlExportError",
     "AuditChange",
     "AuditChangeCategory",
     "AuditChangeCode",
@@ -451,9 +457,11 @@ __all__ = [
     "explain_tolerance_decision",
     "render_audit_package_html",
     "render_governance_chain_html",
+    "render_unified_engineering_report_html",
     "render_decision_report_html",
     "write_audit_package_html",
     "write_governance_chain_html",
+    "write_unified_engineering_report_html",
     "write_decision_report_html",
     "reconcile_allocation",
     "reconcile_statistical_allocation",

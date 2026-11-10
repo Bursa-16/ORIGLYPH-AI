@@ -847,6 +847,30 @@ class WorkspaceSession:
         """Export the complete governance chain as a deterministic HTML artifact."""
         return self.controller.export_governance_html(path)
 
+    @property
+    def unified_html_available(self) -> bool:
+        """True when all ten artifacts are cached and ready for unified export."""
+        ctrl = self.controller
+        return all(
+            v is not None
+            for v in [
+                ctrl.last_decision_report,
+                ctrl.last_audit_package,
+                ctrl.last_audit_comparison,
+                ctrl.last_change_impact,
+                ctrl.last_change_disposition,
+                ctrl.last_approval_readiness,
+                ctrl.last_acceptance_handoff,
+                ctrl.last_acceptance_record,
+                ctrl.last_acceptance_verification,
+                ctrl.last_acceptance_closure,
+            ]
+        )
+
+    def export_unified_html_report(self, path: str | Path) -> Path:
+        """Export the unified engineering report as a deterministic HTML artifact."""
+        return self.controller.export_unified_html_report(path)
+
     def report_contributors_rows(self) -> list[dict[str, object]]:
         """Presentation rows for the report contributors treeview."""
         report = self.controller.last_decision_report
@@ -1791,6 +1815,7 @@ class ToleranceWorkspaceView:
         self._build_acceptance_record_frame(main)
         self._build_acceptance_verification_frame(main)
         self._build_acceptance_closure_frame(main)
+        self._build_unified_export_frame(main)
 
         storage = ttk.Labelframe(main, text="Project File", padding=8)
         storage.grid(row=24, column=0, sticky="ew", pady=(8, 0))
@@ -3007,6 +3032,34 @@ class ToleranceWorkspaceView:
         self._session.export_governance_html(Path(path))
         self._messagebox.showinfo(
             "Export Complete", f"Governance HTML artifact saved to:\n{path}"
+        )
+
+    def _build_unified_export_frame(self, main: Any) -> None:
+        ttk = self._ttk
+        frame = ttk.Labelframe(main, text="Unified Engineering Report", padding=8)
+        frame.grid(row=25, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(
+            frame,
+            text="Export Unified Engineering Report",
+            command=self._export_unified_html_report,
+        ).grid(row=0, column=0, sticky="w")
+
+    def _export_unified_html_report(self) -> None:
+        self._guard(lambda: self._export_unified_html_report_impl())
+
+    def _export_unified_html_report_impl(self) -> None:
+        path = self._filedialog.asksaveasfilename(
+            defaultextension=".html",
+            filetypes=[("HTML artifact", "*.html"), ("All files", "*.*")],
+            initialfile="origlyph_engineering_report.html",
+            title="Export Unified Engineering Report",
+        )
+        if not path:
+            return
+        self._session.export_unified_html_report(Path(path))
+        self._messagebox.showinfo(
+            "Export Complete",
+            f"Unified Engineering Report saved to:\n{path}",
         )
 
     def _run_change_disposition(self) -> None:

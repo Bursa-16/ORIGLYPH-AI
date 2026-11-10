@@ -807,6 +807,15 @@ class WorkspaceSession:
             return ""
         return report.summary_text
 
+    @property
+    def html_report_available(self) -> bool:
+        """True when a decision report is cached and ready for HTML export."""
+        return self.controller.last_decision_report is not None
+
+    def export_html_report(self, path: str | Path) -> Path:
+        """Export the current decision report as an HTML file."""
+        return self.controller.export_html_report(path)
+
     def report_contributors_rows(self) -> list[dict[str, object]]:
         """Presentation rows for the report contributors treeview."""
         report = self.controller.last_decision_report
@@ -2460,6 +2469,11 @@ class ToleranceWorkspaceView:
         self._report_tree.grid(
             row=2, column=0, columnspan=2, sticky="nsew", pady=(6, 0)
         )
+        ttk.Button(
+            report_frame,
+            text="Export HTML Report",
+            command=self._export_html_report,
+        ).grid(row=3, column=0, sticky="w", pady=(6, 0))
 
     def _generate_report(self) -> None:
         self._guard(lambda: self._generate_report_impl())
@@ -2467,6 +2481,23 @@ class ToleranceWorkspaceView:
     def _generate_report_impl(self) -> None:
         self._session.generate_decision_report()
         self._refresh_report()
+
+    def _export_html_report(self) -> None:
+        self._guard(lambda: self._export_html_report_impl())
+
+    def _export_html_report_impl(self) -> None:
+        path = self._filedialog.asksaveasfilename(
+            defaultextension=".html",
+            filetypes=[("HTML report", "*.html"), ("All files", "*.*")],
+            initialfile="origlyph_decision_report.html",
+            title="Export HTML Report",
+        )
+        if not path:
+            return
+        self._session.export_html_report(Path(path))
+        self._messagebox.showinfo(
+            "Export Complete", f"HTML report saved to:\n{path}"
+        )
 
     def _refresh_report(self) -> None:
         """Keep the Decision Report panel in step with the controller cache."""

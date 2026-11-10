@@ -166,6 +166,11 @@ from .exceptions import (
     InvalidVarianceError,
     OriglyphToleranceError,
 )
+from .html_export import (
+    DecisionReportHtmlExportError,
+    render_decision_report_html,
+    write_decision_report_html,
+)
 from .integrity import (
     AuditIntegrityResult,
     AuditIntegritySeverity,
@@ -321,6 +326,7 @@ __all__ = [
     "ContributorAllocationCompliance",
     "Correlation",
     "CovariancePairImpact",
+    "DecisionReportHtmlExportError",
     "DecisionComparison",
     "DecisionEvidenceBundle",
     "DecisionEvidenceCode",
@@ -431,6 +437,8 @@ __all__ = [
     "evaluate_tolerance_decision",
     "evaluate_audit_approval_readiness",
     "explain_tolerance_decision",
+    "render_decision_report_html",
+    "write_decision_report_html",
     "reconcile_allocation",
     "reconcile_statistical_allocation",
     "statistical",

@@ -816,6 +816,15 @@ class WorkspaceSession:
         """Export the current decision report as an HTML file."""
         return self.controller.export_html_report(path)
 
+    @property
+    def audit_html_available(self) -> bool:
+        """True when an audit package is cached and ready for HTML export."""
+        return self.controller.last_audit_package is not None
+
+    def export_audit_html(self, path: str | Path) -> Path:
+        """Export the current audit package as a deterministic HTML artifact."""
+        return self.controller.export_audit_html(path)
+
     def report_contributors_rows(self) -> list[dict[str, object]]:
         """Presentation rows for the report contributors treeview."""
         report = self.controller.last_decision_report
@@ -2573,6 +2582,11 @@ class ToleranceWorkspaceView:
         self._audit_manifest_tree.grid(
             row=4, column=0, columnspan=2, sticky="nsew", pady=(4, 0)
         )
+        ttk.Button(
+            audit_frame,
+            text="Export Audit HTML",
+            command=self._export_audit_html,
+        ).grid(row=5, column=0, sticky="w", pady=(6, 0))
 
     def _run_audit_package(self) -> None:
         self._guard(lambda: self._run_audit_package_impl())
@@ -2580,6 +2594,23 @@ class ToleranceWorkspaceView:
     def _run_audit_package_impl(self) -> None:
         self._session.generate_audit_package()
         self._refresh_audit()
+
+    def _export_audit_html(self) -> None:
+        self._guard(lambda: self._export_audit_html_impl())
+
+    def _export_audit_html_impl(self) -> None:
+        path = self._filedialog.asksaveasfilename(
+            defaultextension=".html",
+            filetypes=[("HTML artifact", "*.html"), ("All files", "*.*")],
+            initialfile="origlyph_audit_package.html",
+            title="Export Audit HTML",
+        )
+        if not path:
+            return
+        self._session.export_audit_html(Path(path))
+        self._messagebox.showinfo(
+            "Export Complete", f"Audit HTML artifact saved to:\n{path}"
+        )
 
     def _refresh_audit(self) -> None:
         """Keep the Audit Package panel in step with the controller cache."""

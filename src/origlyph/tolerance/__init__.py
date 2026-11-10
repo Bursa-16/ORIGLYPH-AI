@@ -109,6 +109,11 @@ from .audit import (
     build_decision_audit_package,
     verify_decision_audit_package,
 )
+from .audit_html_export import (
+    AuditPackageHtmlExportError,
+    render_audit_package_html,
+    write_audit_package_html,
+)
 from .budget import (
     statistical_budget,
     worst_case_budget,
@@ -308,6 +313,7 @@ __all__ = [
     "AuditIntegrityStatus",
     "AuditIntegrityViolation",
     "AuditIntegrityViolationCode",
+    "AuditPackageHtmlExportError",
     "AuditChange",
     "AuditChangeCategory",
     "AuditChangeCode",
@@ -437,7 +443,9 @@ __all__ = [
     "evaluate_tolerance_decision",
     "evaluate_audit_approval_readiness",
     "explain_tolerance_decision",
+    "render_audit_package_html",
     "render_decision_report_html",
+    "write_audit_package_html",
     "write_decision_report_html",
     "reconcile_allocation",
     "reconcile_statistical_allocation",

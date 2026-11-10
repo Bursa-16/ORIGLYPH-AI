@@ -825,6 +825,28 @@ class WorkspaceSession:
         """Export the current audit package as a deterministic HTML artifact."""
         return self.controller.export_audit_html(path)
 
+    @property
+    def governance_html_available(self) -> bool:
+        """True when the complete governance chain is cached and ready for export."""
+        ctrl = self.controller
+        return all(
+            v is not None
+            for v in [
+                ctrl.last_audit_comparison,
+                ctrl.last_change_impact,
+                ctrl.last_change_disposition,
+                ctrl.last_approval_readiness,
+                ctrl.last_acceptance_handoff,
+                ctrl.last_acceptance_record,
+                ctrl.last_acceptance_verification,
+                ctrl.last_acceptance_closure,
+            ]
+        )
+
+    def export_governance_html(self, path: str | Path) -> Path:
+        """Export the complete governance chain as a deterministic HTML artifact."""
+        return self.controller.export_governance_html(path)
+
     def report_contributors_rows(self) -> list[dict[str, object]]:
         """Presentation rows for the report contributors treeview."""
         report = self.controller.last_decision_report
@@ -2964,6 +2986,28 @@ class ToleranceWorkspaceView:
             frame,
             textvariable=self._acceptance_closure_detail,
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        ttk.Button(
+            frame,
+            text="Export Governance HTML",
+            command=self._export_governance_html,
+        ).grid(row=2, column=0, sticky="w", pady=(6, 0))
+
+    def _export_governance_html(self) -> None:
+        self._guard(lambda: self._export_governance_html_impl())
+
+    def _export_governance_html_impl(self) -> None:
+        path = self._filedialog.asksaveasfilename(
+            defaultextension=".html",
+            filetypes=[("HTML artifact", "*.html"), ("All files", "*.*")],
+            initialfile="origlyph_governance_report.html",
+            title="Export Governance HTML",
+        )
+        if not path:
+            return
+        self._session.export_governance_html(Path(path))
+        self._messagebox.showinfo(
+            "Export Complete", f"Governance HTML artifact saved to:\n{path}"
+        )
 
     def _run_change_disposition(self) -> None:
         self._guard(lambda: self._run_change_disposition_impl())

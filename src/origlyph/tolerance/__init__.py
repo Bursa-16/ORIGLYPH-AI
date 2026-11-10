@@ -171,6 +171,11 @@ from .exceptions import (
     InvalidVarianceError,
     OriglyphToleranceError,
 )
+from .governance_html_export import (
+    GovernanceHtmlExportError,
+    render_governance_chain_html,
+    write_governance_chain_html,
+)
 from .html_export import (
     DecisionReportHtmlExportError,
     render_decision_report_html,
@@ -314,6 +319,7 @@ __all__ = [
     "AuditIntegrityViolation",
     "AuditIntegrityViolationCode",
     "AuditPackageHtmlExportError",
+    "GovernanceHtmlExportError",
     "AuditChange",
     "AuditChangeCategory",
     "AuditChangeCode",
@@ -444,8 +450,10 @@ __all__ = [
     "evaluate_audit_approval_readiness",
     "explain_tolerance_decision",
     "render_audit_package_html",
+    "render_governance_chain_html",
     "render_decision_report_html",
     "write_audit_package_html",
+    "write_governance_chain_html",
     "write_decision_report_html",
     "reconcile_allocation",
     "reconcile_statistical_allocation",

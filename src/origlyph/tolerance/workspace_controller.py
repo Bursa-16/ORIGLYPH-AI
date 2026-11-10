@@ -1315,6 +1315,57 @@ class ToleranceWorkspaceController:
         from .audit_html_export import write_audit_package_html
         return write_audit_package_html(self._last_audit_package, path)
 
+    def export_governance_html(self, path: str | Path) -> Path:
+        """Export the complete governance chain as a deterministic HTML artifact.
+
+        Requires all eight governance/acceptance chain artifacts already cached
+        (run_audit_comparison(), run_change_impact(), run_change_disposition(),
+        run_approval_readiness(), run_acceptance_handoff(), run_acceptance_record(),
+        run_acceptance_verification(), run_acceptance_closure() must all have been
+        called since the last state mutation).  Does not trigger any governance
+        or acceptance generation.  Does not mutate workspace state or project
+        identity.
+
+        Raises
+        ------
+        InvalidToleranceWorkspaceError
+            If any required governance/acceptance artifact is missing.
+        """
+        missing = [
+            name
+            for name, value in [
+                ("last_audit_comparison", self._last_audit_comparison),
+                ("last_change_impact", self._last_change_impact),
+                ("last_change_disposition", self._last_change_disposition),
+                ("last_approval_readiness", self._last_approval_readiness),
+                ("last_acceptance_handoff", self._last_acceptance_handoff),
+                ("last_acceptance_record", self._last_acceptance_record),
+                (
+                    "last_acceptance_verification",
+                    self._last_acceptance_verification,
+                ),
+                ("last_acceptance_closure", self._last_acceptance_closure),
+            ]
+            if value is None
+        ]
+        if missing:
+            raise InvalidToleranceWorkspaceError(
+                "Governance HTML export requires a complete governance chain. "
+                f"Missing: {', '.join(missing)}."
+            )
+        from .governance_html_export import write_governance_chain_html
+        return write_governance_chain_html(
+            comparison=self._last_audit_comparison,  # type: ignore[arg-type]
+            change_impact=self._last_change_impact,  # type: ignore[arg-type]
+            disposition=self._last_change_disposition,  # type: ignore[arg-type]
+            approval_readiness=self._last_approval_readiness,  # type: ignore[arg-type]
+            acceptance_handoff=self._last_acceptance_handoff,  # type: ignore[arg-type]
+            acceptance_record=self._last_acceptance_record,  # type: ignore[arg-type]
+            acceptance_verification=self._last_acceptance_verification,  # type: ignore[arg-type]
+            acceptance_closure=self._last_acceptance_closure,  # type: ignore[arg-type]
+            path=path,
+        )
+
     def run_audit_integrity(self) -> AuditIntegrityResult:
         """Validate structural integrity of the decision report (Stage 15N).
 

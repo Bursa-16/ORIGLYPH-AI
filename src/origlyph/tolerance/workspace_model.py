@@ -871,6 +871,14 @@ class WorkspaceSession:
         """Export the unified engineering report as a deterministic HTML artifact."""
         return self.controller.export_unified_html_report(path)
 
+    def restore_governance_state(
+        self,
+        *,
+        comparison_path: str | Path | None = None,
+    ) -> None:
+        """Delegate governance state restoration to the controller (Stage 21G)."""
+        self.controller.restore_governance_state(comparison_path=comparison_path)
+
     def report_contributors_rows(self) -> list[dict[str, object]]:
         """Presentation rows for the report contributors treeview."""
         report = self.controller.last_decision_report
@@ -1823,6 +1831,11 @@ class ToleranceWorkspaceView:
         ttk.Button(storage, text="Save Project", command=self._save).pack(
             side="left", padx=(8, 0)
         )
+        ttk.Button(
+            storage,
+            text="Restore Governance State",
+            command=self._restore_governance_state,
+        ).pack(side="left", padx=(8, 0))
 
         alloc_plan = ttk.Labelframe(main, text="Allocation Plan", padding=8)
         alloc_plan.grid(row=8, column=0, sticky="ew", pady=(8, 0))
@@ -2124,6 +2137,39 @@ class ToleranceWorkspaceView:
         if not path:
             return
         self._session.save_project(Path(path), project_name=self._chain_name.get())
+
+    def _restore_governance_state(self) -> None:
+        self._guard(lambda: self._restore_governance_state_impl())
+
+    def _restore_governance_state_impl(self) -> None:
+        want_comparison = self._messagebox.askyesnocancel(
+            "Restore Governance State",
+            "Restore the full governance chain from persisted project inputs.\n\n"
+            "Do you want to supply a comparison audit package file?\n\n"
+            "Yes — load a comparison file and restore the full chain.\n"
+            "No — restore the core chain only (up to audit package).\n"
+            "Cancel — abort.",
+        )
+        if want_comparison is None:
+            return
+        comparison_path: str | None = None
+        if want_comparison:
+            comparison_path = self._filedialog.askopenfilename(
+                filetypes=[("Audit package JSON", "*.json"), ("All files", "*.*")],
+                title="Select Comparison Audit Package",
+            )
+            if not comparison_path:
+                return
+        self._session.restore_governance_state(comparison_path=comparison_path)
+        self._refresh_result()
+        self._refresh_decision()
+        self._refresh_evidence()
+        self._refresh_report()
+        self._refresh_audit()
+        self._refresh_comparison()
+        self._refresh_change_governance()
+        self._refresh_acceptance()
+        self._refresh_acceptance_closure()
 
     def _refresh_rows(self) -> None:
         selected = self._rows.selection()

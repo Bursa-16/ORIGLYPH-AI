@@ -1418,6 +1418,110 @@ class ToleranceWorkspaceController:
             path=path,
         )
 
+    def _clear_all_governance_runtime_state(self) -> None:
+        """Clear every derived runtime field; authoritative WorkspaceState is unchanged.
+
+        Called at the start of :meth:`restore_governance_state` to ensure a failed
+        partial restore cannot leave a misleading mix of old and new artifacts.
+        """
+        self._last_result = None
+        self._last_decision = None
+        self._last_sensitivity = None
+        self._last_budget = None
+        self._last_allocation_validation = None
+        self._last_reconciliation = None
+        self._last_statistical_reconciliation = None
+        self._last_evidence = None
+        self._last_explanation = None
+        self._last_decision_report = None
+        self._last_audit_integrity = None
+        self._last_audit_package = None
+        self._comparison_audit_package = None
+        self._last_audit_comparison = None
+        self._last_change_impact = None
+        self._last_change_disposition = None
+        self._last_approval_readiness = None
+        self._last_acceptance_handoff = None
+        self._last_acceptance_record = None
+        self._last_acceptance_verification = None
+        self._last_acceptance_closure = None
+
+    def restore_governance_state(
+        self,
+        *,
+        comparison_path: str | Path | None = None,
+    ) -> None:
+        """Deterministically restore runtime governance state from persisted inputs.
+
+        Orchestrates existing deterministic methods to rebuild the runtime
+        governance chain from authoritative project inputs.  This method is an
+        explicit user action; it is never called automatically on project open.
+
+        Without a comparison path the chain is restored up to and including the
+        audit package.  With a comparison path the full chain through acceptance
+        closure is restored when ``acceptance_state`` is set; otherwise it
+        restores through :meth:`run_acceptance_handoff` and stops.
+
+        Parameters
+        ----------
+        comparison_path:
+            Optional path to a comparison audit package JSON file.  When ``None``
+            restoration stops after :meth:`run_audit_package`.  When supplied the
+            comparison-dependent chain is restored as far as inputs allow.
+
+        Raises
+        ------
+        InvalidToleranceWorkspaceError
+            When any prerequisite is missing or any chain step fails.
+
+        Notes
+        -----
+        All derived runtime state is cleared at entry before rebuilding.  On
+        failure the cleared state remains — no misleadingly partial governance
+        chain is left in place.  The authoritative ``WorkspaceState`` is never
+        mutated; project identity is unchanged.
+        """
+        if not self.contributors:
+            raise InvalidToleranceWorkspaceError(
+                "restore_governance_state requires at least one contributor."
+            )
+        if self._state.specification is None:
+            raise InvalidToleranceWorkspaceError(
+                "restore_governance_state requires a specification "
+                "(set allowed_worst_case_span or allowed_combined_sigma)."
+            )
+        if comparison_path is not None:
+            _cpath = Path(comparison_path)
+            if not _cpath.is_file():
+                raise InvalidToleranceWorkspaceError(
+                    f"Comparison package file not found: {_cpath}"
+                )
+
+        _acc_before = self._state.acceptance_state
+
+        self._clear_all_governance_runtime_state()
+
+        self.run_analysis()
+        self.evaluate_decision()
+        self.run_decision_evidence()
+        self.run_decision_report()
+        self.run_audit_integrity()
+        self.run_audit_package()
+
+        if comparison_path is not None:
+            self.load_comparison_audit_package(Path(comparison_path))
+            self.run_audit_comparison()
+            self.run_change_impact()
+            self.run_change_disposition()
+            self.run_approval_readiness()
+            self.run_acceptance_handoff()
+            if self._state.acceptance_state is not None:
+                self.run_acceptance_record()
+                self.run_acceptance_verification()
+                self.run_acceptance_closure()
+
+        assert self._state.acceptance_state == _acc_before
+
     def run_audit_integrity(self) -> AuditIntegrityResult:
         """Validate structural integrity of the decision report (Stage 15N).
 

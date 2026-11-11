@@ -53,6 +53,24 @@ from .role import (
     bind_datum_reference_frame,
 )
 from .stl import StlImporter
+from .topology import (
+    CanonicalTopologyModel,
+    DanglingTopologyReferenceError,
+    DuplicateTopologyIdError,
+    TopologyEdge,
+    TopologyEntityId,
+    TopologyFace,
+    TopologyOrientation,
+    TopologyShell,
+    TopologySolid,
+    TopologyValidationError,
+    TopologyVertex,
+    TopologyWire,
+)
+from .topology_adapter import (
+    CadTopologyAdapter,
+    UnsupportedCadTopologyBackendError,
+)
 
 __all__ = [
     "BoundReference",
@@ -84,6 +102,20 @@ __all__ = [
     "SourceUnitSystem",
     "StlImporter",
     "UnsupportedCadFormatError",
+    "UnsupportedCadTopologyBackendError",
     "UnsupportedContent",
     "UnsupportedSourceUnitError",
+    "CanonicalTopologyModel",
+    "CadTopologyAdapter",
+    "DanglingTopologyReferenceError",
+    "DuplicateTopologyIdError",
+    "TopologyEdge",
+    "TopologyEntityId",
+    "TopologyFace",
+    "TopologyOrientation",
+    "TopologyShell",
+    "TopologySolid",
+    "TopologyValidationError",
+    "TopologyVertex",
+    "TopologyWire",
 ]

@@ -33,8 +33,23 @@ EXPECTED_EXPORTS = {
     "SourceUnitSystem",
     "StlImporter",
     "UnsupportedCadFormatError",
+    "UnsupportedCadTopologyBackendError",
     "UnsupportedContent",
     "UnsupportedSourceUnitError",
+    # Stage 22C: canonical topology
+    "CanonicalTopologyModel",
+    "CadTopologyAdapter",
+    "DanglingTopologyReferenceError",
+    "DuplicateTopologyIdError",
+    "TopologyEdge",
+    "TopologyEntityId",
+    "TopologyFace",
+    "TopologyOrientation",
+    "TopologyShell",
+    "TopologySolid",
+    "TopologyValidationError",
+    "TopologyVertex",
+    "TopologyWire",
 }
 
 

@@ -11,6 +11,9 @@ dev = [
     "ruff",
     "pyright",
 ]
+brep = [
+    "cadquery-ocp-novtk>=8.0.1.1.0,<9; python_version >= '3.11'",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

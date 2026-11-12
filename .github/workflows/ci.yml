@@ -30,3 +30,33 @@ jobs:
 
       - name: Test
         run: pytest
+
+  ci-brep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install project with dev and brep extras
+        run: python -m pip install -e ".[dev,brep]"
+
+      - name: Verify OCP import
+        run: python -c "import OCP; print('OCP file:', OCP.__file__)"
+
+      - name: Run B-Rep tests
+        run: |
+          pytest \
+            tests/unit/test_optional_dependencies.py \
+            tests/unit/cad/test_step_kernel_adapter.py \
+            tests/unit/cad/test_topology.py \
+            tests/unit/cad/test_topology_adapter.py \
+            tests/integration/test_step_topology_spike.py \
+            -v

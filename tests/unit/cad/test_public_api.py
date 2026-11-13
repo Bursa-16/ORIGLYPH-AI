@@ -31,6 +31,7 @@ EXPECTED_EXPORTS = {
     "SourceEntityIdentity",
     "SourceToNeutralMapping",
     "SourceUnitSystem",
+    "load_step_topology",
     "StlImporter",
     "UnsupportedCadFormatError",
     "UnsupportedCadTopologyBackendError",

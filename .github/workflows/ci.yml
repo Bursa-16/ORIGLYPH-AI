@@ -56,7 +56,9 @@ jobs:
           pytest \
             tests/unit/test_optional_dependencies.py \
             tests/unit/cad/test_step_kernel_adapter.py \
+            tests/unit/cad/test_step_dispatch.py \
             tests/unit/cad/test_topology.py \
             tests/unit/cad/test_topology_adapter.py \
             tests/integration/test_step_topology_spike.py \
+            tests/integration/test_step_controlled_import.py \
             -v

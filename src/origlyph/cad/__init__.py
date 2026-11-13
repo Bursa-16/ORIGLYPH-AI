@@ -52,6 +52,7 @@ from .role import (
     bind_datum_constraint,
     bind_datum_reference_frame,
 )
+from .step_loader import load_step_topology
 from .stl import StlImporter
 from .topology import (
     CanonicalTopologyModel,
@@ -100,6 +101,7 @@ __all__ = [
     "SourceEntityIdentity",
     "SourceToNeutralMapping",
     "SourceUnitSystem",
+    "load_step_topology",
     "StlImporter",
     "UnsupportedCadFormatError",
     "UnsupportedCadTopologyBackendError",

@@ -1,5 +1,9 @@
 """Origlyph persisted project model (Stage 16B)."""
 
+from .cad_source_bridge import (
+    cad_source_reference_from_step,
+    project_with_step_source,
+)
 from .exceptions import (
     InvalidProjectError,
     OriglyphProjectError,
@@ -42,3 +46,4 @@ __all__ += ["TOLERANCE_WORKSPACE_EXTENSION_KEY"]
 __all__ += ["build_project_with_tolerance_workspace"]
 __all__ += ["project_with_tolerance_workspace"]
 __all__ += ["workspace_state_from_project"]
+__all__ += ["cad_source_reference_from_step", "project_with_step_source"]

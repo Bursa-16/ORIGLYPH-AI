@@ -4,6 +4,21 @@ from .cad_source_bridge import (
     cad_source_reference_from_step,
     project_with_step_source,
 )
+from .datum_topology_binding import (
+    BINDING_FORMAT_VERSION,
+    RESOLUTION_RESOLVED,
+    RESOLUTION_UNBOUND,
+    RESOLUTION_UNRESOLVED_MISSING_ENTITY,
+    RESOLUTION_UNRESOLVED_SOURCE_REVISION,
+    SUPPORTED_DATUM_ENTITY_KINDS,
+    DatumTopologyRef,
+    DatumTopologyResolution,
+    datum_role_assignment_with_topology,
+    decode_datum_topology_ref,
+    encode_datum_topology_ref,
+    is_topology_binding,
+    resolve_datum_topology_bindings,
+)
 from .exceptions import (
     InvalidProjectError,
     OriglyphProjectError,
@@ -47,3 +62,11 @@ __all__ += ["build_project_with_tolerance_workspace"]
 __all__ += ["project_with_tolerance_workspace"]
 __all__ += ["workspace_state_from_project"]
 __all__ += ["cad_source_reference_from_step", "project_with_step_source"]
+__all__ += ["BINDING_FORMAT_VERSION", "SUPPORTED_DATUM_ENTITY_KINDS"]
+__all__ += ["RESOLUTION_RESOLVED", "RESOLUTION_UNBOUND"]
+__all__ += ["RESOLUTION_UNRESOLVED_MISSING_ENTITY"]
+__all__ += ["RESOLUTION_UNRESOLVED_SOURCE_REVISION"]
+__all__ += ["DatumTopologyRef", "DatumTopologyResolution"]
+__all__ += ["datum_role_assignment_with_topology"]
+__all__ += ["decode_datum_topology_ref", "encode_datum_topology_ref"]
+__all__ += ["is_topology_binding", "resolve_datum_topology_bindings"]

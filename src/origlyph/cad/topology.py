@@ -43,7 +43,10 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Sequence
+from typing import TYPE_CHECKING, Optional, Sequence
+
+if TYPE_CHECKING:
+    from .topology_signature import TopologyFaceSignature
 
 from origlyph.geometry import Point3D
 
@@ -254,6 +257,7 @@ class TopologyFace:
     inner_wire_ids: tuple[TopologyEntityId, ...] = ()
     orientation: TopologyOrientation = TopologyOrientation.FORWARD
     source_identity: Optional[SourceEntityIdentity] = None
+    surface_signature: Optional[TopologyFaceSignature] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "inner_wire_ids", tuple(self.inner_wire_ids))

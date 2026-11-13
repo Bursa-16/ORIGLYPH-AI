@@ -72,6 +72,14 @@ from .topology_adapter import (
     CadTopologyAdapter,
     UnsupportedCadTopologyBackendError,
 )
+from .topology_signature import (
+    QUANTIZE_PRECISION,
+    FaceSurfaceType,
+    TopologyFaceSignature,
+    build_face_signature,
+    compute_persistent_face_id,
+    compute_vertex_fingerprint,
+)
 
 __all__ = [
     "BoundReference",
@@ -120,4 +128,10 @@ __all__ = [
     "TopologyValidationError",
     "TopologyVertex",
     "TopologyWire",
+    "FaceSurfaceType",
+    "QUANTIZE_PRECISION",
+    "TopologyFaceSignature",
+    "build_face_signature",
+    "compute_persistent_face_id",
+    "compute_vertex_fingerprint",
 ]

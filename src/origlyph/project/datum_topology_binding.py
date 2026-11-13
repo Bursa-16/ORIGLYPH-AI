@@ -31,11 +31,15 @@ from .models import (
 
 __all__ = [
     "BINDING_FORMAT_VERSION",
+    "BINDING_FORMAT_VERSION_V2",
     "SUPPORTED_DATUM_ENTITY_KINDS",
     "RESOLUTION_RESOLVED",
     "RESOLUTION_UNRESOLVED_SOURCE_REVISION",
     "RESOLUTION_UNRESOLVED_MISSING_ENTITY",
     "RESOLUTION_UNBOUND",
+    "RESOLUTION_REMAPPED_EXACT",
+    "RESOLUTION_REMAPPED_PROBABLE",
+    "RESOLUTION_AMBIGUOUS",
     "DatumTopologyRef",
     "DatumTopologyResolution",
     "datum_role_assignment_with_topology",
@@ -46,14 +50,19 @@ __all__ = [
 ]
 
 BINDING_FORMAT_VERSION: str = "topology:v1"
+BINDING_FORMAT_VERSION_V2: str = "topology:v2"
 SUPPORTED_DATUM_ENTITY_KINDS: frozenset[str] = frozenset({"face"})
 
 RESOLUTION_RESOLVED: str = "RESOLVED"
 RESOLUTION_UNRESOLVED_SOURCE_REVISION: str = "UNRESOLVED_SOURCE_REVISION"
 RESOLUTION_UNRESOLVED_MISSING_ENTITY: str = "UNRESOLVED_MISSING_ENTITY"
 RESOLUTION_UNBOUND: str = "UNBOUND"
+RESOLUTION_REMAPPED_EXACT: str = "REMAPPED_EXACT"
+RESOLUTION_REMAPPED_PROBABLE: str = "REMAPPED_PROBABLE"
+RESOLUTION_AMBIGUOUS: str = "AMBIGUOUS"
 
 _BINDING_PREFIX: str = "topology:v1:"
+_BINDING_PREFIX_V2: str = "topology:v2:"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,11 +78,16 @@ class DatumTopologyRef:
         Canonical entity type.  Stage 22G supports ``"face"`` only.
     entity_id:
         ``TopologyEntityId.value`` of the referenced topology entity.
+    persistent_id:
+        Stage 22H persistent face identity SHA-256 (64-char lowercase hex),
+        or ``None`` for Stage 22G-era bindings without embedded signatures.
+        Encoded in v2 format only; v1 bindings always decode to ``None``.
     """
 
     source_fingerprint: str
     entity_kind: str
     entity_id: str
+    persistent_id: str | None = None
 
     def __post_init__(self) -> None:
         if not _is_sha(self.source_fingerprint):
@@ -91,17 +105,33 @@ class DatumTopologyRef:
             raise InvalidProjectError(
                 "DatumTopologyRef.entity_id must be a non-empty string"
             )
+        if self.persistent_id is not None and not _is_sha(self.persistent_id):
+            raise InvalidProjectError(
+                "DatumTopologyRef.persistent_id must be a 64-character "
+                "lowercase sha256 hex string when present"
+            )
 
 
 def encode_datum_topology_ref(ref: DatumTopologyRef) -> str:
     """Return the bound_reference_key wire-format string for *ref*.
 
-    Format: ``topology:v1:{source_fingerprint}:{entity_kind}:{entity_id}``
+    v1 format (no persistent_id):
+        ``topology:v1:{source_fingerprint}:{entity_kind}:{entity_id}``
 
-    ``entity_id`` may contain colons; :func:`decode_datum_topology_ref` splits
-    on the first four colons only (``str.split(":", 4)``) to recover all five
-    fields unambiguously.
+    v2 format (with persistent_id):
+        ``topology:v2:{source_fingerprint}:{entity_kind}:{entity_id}:{pid64}``
+
+    ``entity_id`` may contain colons; :func:`decode_datum_topology_ref` handles
+    both formats unambiguously via version-prefix detection.
     """
+    if ref.persistent_id is not None:
+        return (
+            f"{BINDING_FORMAT_VERSION_V2}"
+            f":{ref.source_fingerprint}"
+            f":{ref.entity_kind}"
+            f":{ref.entity_id}"
+            f":{ref.persistent_id}"
+        )
     return (
         f"{BINDING_FORMAT_VERSION}"
         f":{ref.source_fingerprint}"
@@ -110,27 +140,33 @@ def encode_datum_topology_ref(ref: DatumTopologyRef) -> str:
     )
 
 
-def decode_datum_topology_ref(key: str) -> DatumTopologyRef:
+def decode_datum_topology_ref(key: str) -> DatumTopologyRef:  # noqa: C901
     """Decode a bound_reference_key string into a :class:`DatumTopologyRef`.
+
+    Handles both v1 (``topology:v1:…``) and v2 (``topology:v2:…``) formats.
+
+    v2 parsing: ``key.split(":", 4)`` → 5 parts; ``parts[4]`` contains
+    ``{entity_id}:{pid64}`` where ``pid64`` is exactly 64 lowercase hex chars.
+    The split point is determined by the fixed 65-char tail ``":" + pid64``.
 
     Raises :class:`InvalidProjectError` on any malformed or unsupported input.
     """
     if not isinstance(key, str):
         raise InvalidProjectError("datum topology key must be a string")
-    if not key.startswith(_BINDING_PREFIX):
+    is_v2 = key.startswith(_BINDING_PREFIX_V2)
+    if not is_v2 and not key.startswith(_BINDING_PREFIX):
         raise InvalidProjectError(
-            f"datum topology key must start with {_BINDING_PREFIX!r}; "
-            f"got {key!r}"
+            f"datum topology key must start with {_BINDING_PREFIX!r} or "
+            f"{_BINDING_PREFIX_V2!r}; got {key!r}"
         )
-    # Split at most 4 times → ["topology", "v1", fingerprint, kind, entity_id]
-    # entity_id may itself contain colons; maxsplit keeps it intact.
+    # Split at most 4 times → ["topology", "v1/v2", fingerprint, kind, rest]
     parts = key.split(":", 4)
     if len(parts) != 5:
         raise InvalidProjectError(
             f"malformed datum topology key; expected 5 colon-delimited "
             f"fields, got {len(parts)}: {key!r}"
         )
-    _fmt, _ver, fingerprint, kind, entity_id = parts
+    _fmt, _ver, fingerprint, kind, rest = parts
     if not _is_sha(fingerprint):
         raise InvalidProjectError(
             f"datum topology key contains invalid fingerprint: {fingerprint!r}"
@@ -140,6 +176,35 @@ def decode_datum_topology_ref(key: str) -> DatumTopologyRef:
             f"datum topology key entity_kind {kind!r} is not in supported set "
             f"{sorted(SUPPORTED_DATUM_ENTITY_KINDS)}"
         )
+
+    if is_v2:
+        # rest = "{entity_id}:{pid64}" where pid64 is exactly 64 hex chars
+        # The tail is always ":" + 64 chars = 65 chars
+        if len(rest) < 65 or rest[-65] != ":":
+            raise InvalidProjectError(
+                f"malformed v2 datum topology key; rest field must end with "
+                f"':<64-hex-pid>'; got rest={rest!r}"
+            )
+        entity_id = rest[:-65]
+        pid64 = rest[-64:]
+        if not _is_sha(pid64):
+            raise InvalidProjectError(
+                f"malformed v2 datum topology key; persistent_id is not a "
+                f"64-char lowercase sha256 hex: {pid64!r}"
+            )
+        if not entity_id:
+            raise InvalidProjectError(
+                "datum topology v2 key entity_id must be non-empty"
+            )
+        return DatumTopologyRef(
+            source_fingerprint=fingerprint,
+            entity_kind=kind,
+            entity_id=entity_id,
+            persistent_id=pid64,
+        )
+
+    # v1
+    entity_id = rest
     if not entity_id:
         raise InvalidProjectError(
             "datum topology key entity_id must be non-empty"
@@ -152,8 +217,10 @@ def decode_datum_topology_ref(key: str) -> DatumTopologyRef:
 
 
 def is_topology_binding(key: str | None) -> bool:
-    """Return ``True`` when *key* is a Stage 22G topology binding key."""
-    return isinstance(key, str) and key.startswith(_BINDING_PREFIX)
+    """Return ``True`` when *key* is a v1 or v2 topology binding key."""
+    return isinstance(key, str) and (
+        key.startswith(_BINDING_PREFIX) or key.startswith(_BINDING_PREFIX_V2)
+    )
 
 
 def datum_role_assignment_with_topology(

@@ -51,6 +51,13 @@ EXPECTED_EXPORTS = {
     "TopologyValidationError",
     "TopologyVertex",
     "TopologyWire",
+    # Stage 22H: persistent topology identity
+    "FaceSurfaceType",
+    "QUANTIZE_PRECISION",
+    "TopologyFaceSignature",
+    "build_face_signature",
+    "compute_persistent_face_id",
+    "compute_vertex_fingerprint",
 }
 
 

@@ -37,6 +37,7 @@ from .topology import (
     TopologyVertex,
     TopologyWire,
 )
+from .topology_signature import FaceSurfaceType, build_face_signature
 
 __all__ = [
     "StepKernelAdapter",
@@ -283,7 +284,7 @@ def _build_canonical(  # noqa: C901, PLR0912, PLR0914, PLR0915
         wire_reg.append((shape, wire))
         return wid
 
-    def _get_or_add_face(shape: object) -> TopologyEntityId:
+    def _get_or_add_face(shape: object) -> TopologyEntityId:  # noqa: C901
         for s, f in face_reg:
             if shape.IsSame(s):  # type: ignore[union-attr]
                 return f.entity_id
@@ -310,12 +311,123 @@ def _build_canonical(  # noqa: C901, PLR0912, PLR0914, PLR0915
             else:
                 raise CadImportError("face has no wires; cannot construct topology")
 
+        # --- Build geometric signature (gracefully degrades to UNKNOWN) ------
+        vertex_points: list[tuple[float, float, float]] = []
+        try:
+            from OCP.TopAbs import TopAbs_VERTEX as _TopAbsVertex  # type: ignore[import-not-found]  # noqa: I001,PLC0415
+            vexp = _TopExp_Explorer(topo_face, _TopAbsVertex)  # type: ignore[call-arg]
+            while vexp.More():  # type: ignore[union-attr]
+                tv = _TopoDS.Vertex(vexp.Current())  # type: ignore[union-attr]
+                p = _BRep_Tool.Pnt_s(tv)  # type: ignore[union-attr]
+                vertex_points.append((float(p.X()), float(p.Y()), float(p.Z())))  # type: ignore[union-attr]
+                vexp.Next()  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            pass
+
+        surf_type: FaceSurfaceType = FaceSurfaceType.UNKNOWN
+        surf_params: tuple[float, ...] = ()
+        try:
+            from OCP.GeomAbs import GeomAbs_Cone as _GAbs_Cone  # type: ignore[import-not-found]  # noqa: I001,PLC0415
+            from OCP.GeomAbs import GeomAbs_Cylinder as _GAbs_Cyl  # type: ignore[import-not-found]  # noqa: PLC0415
+            from OCP.GeomAbs import GeomAbs_Plane as _GAbs_Plane  # type: ignore[import-not-found]  # noqa: PLC0415
+            from OCP.GeomAbs import GeomAbs_Sphere as _GAbs_Sphere  # type: ignore[import-not-found]  # noqa: PLC0415
+            from OCP.GeomAbs import GeomAbs_Torus as _GAbs_Torus  # type: ignore[import-not-found]  # noqa: PLC0415
+            from OCP.GeomAdaptor import GeomAdaptor_Surface as _GAS  # type: ignore[import-not-found]  # noqa: PLC0415
+            surf_result = _BRep_Tool.Surface_s(topo_face)  # type: ignore[union-attr]
+            # OCP returns (Geom_Surface, TopLoc_Location) or just the surface
+            surf = (
+                surf_result[0]
+                if isinstance(surf_result, (tuple, list))
+                else surf_result
+            )
+            if surf is not None:
+                adaptor = _GAS()  # type: ignore[call-arg]
+                adaptor.Load(surf)  # type: ignore[union-attr]
+                st = adaptor.GetType()  # type: ignore[union-attr]
+                if st == _GAbs_Plane:
+                    surf_type = FaceSurfaceType.PLANE
+                    try:
+                        pln = adaptor.Plane()  # type: ignore[union-attr]
+                        ax = pln.Axis()  # type: ignore[union-attr]
+                        n = ax.Direction()  # type: ignore[union-attr]
+                        loc_pt = pln.Location()  # type: ignore[union-attr]
+                        offset = (  # type: ignore[union-attr]
+                            float(n.X()) * float(loc_pt.X())
+                            + float(n.Y()) * float(loc_pt.Y())
+                            + float(n.Z()) * float(loc_pt.Z())
+                        )
+                        surf_params = (
+                            float(n.X()), float(n.Y()), float(n.Z()), offset,  # type: ignore[union-attr]
+                        )
+                    except Exception:  # noqa: BLE001
+                        surf_params = ()
+                elif st == _GAbs_Cyl:
+                    surf_type = FaceSurfaceType.CYLINDER
+                    try:
+                        cyl = adaptor.Cylinder()  # type: ignore[union-attr]
+                        ax = cyl.Axis()  # type: ignore[union-attr]
+                        d = ax.Direction()  # type: ignore[union-attr]
+                        surf_params = (  # type: ignore[union-attr]
+                            float(d.X()), float(d.Y()), float(d.Z()),
+                            float(cyl.Radius()),
+                        )
+                    except Exception:  # noqa: BLE001
+                        surf_params = ()
+                elif st == _GAbs_Cone:
+                    surf_type = FaceSurfaceType.CONE
+                    try:
+                        con = adaptor.Cone()  # type: ignore[union-attr]
+                        ax = con.Axis()  # type: ignore[union-attr]
+                        d = ax.Direction()  # type: ignore[union-attr]
+                        surf_params = (  # type: ignore[union-attr]
+                            float(d.X()), float(d.Y()), float(d.Z()),
+                            float(con.SemiAngle()), float(con.RefRadius()),
+                        )
+                    except Exception:  # noqa: BLE001
+                        surf_params = ()
+                elif st == _GAbs_Sphere:
+                    surf_type = FaceSurfaceType.SPHERE
+                    try:
+                        sph = adaptor.Sphere()  # type: ignore[union-attr]
+                        surf_params = (float(sph.Radius()),)  # type: ignore[union-attr]
+                    except Exception:  # noqa: BLE001
+                        surf_params = ()
+                elif st == _GAbs_Torus:
+                    surf_type = FaceSurfaceType.TORUS
+                    try:
+                        tor = adaptor.Torus()  # type: ignore[union-attr]
+                        surf_params = (  # type: ignore[union-attr]
+                            float(tor.MajorRadius()), float(tor.MinorRadius()),
+                        )
+                    except Exception:  # noqa: BLE001
+                        surf_params = ()
+        except Exception:  # noqa: BLE001
+            pass
+
+        # edge count for adjacency signal
+        all_wids = ([outer_wid] if outer_wid is not None else []) + inner_wids
+        edge_count = 0
+        for wref in all_wids:
+            for _, w in wire_reg:
+                if w.entity_id == wref:
+                    edge_count += len(w.edge_ids)
+                    break
+
+        sig = build_face_signature(
+            vertex_points=vertex_points,
+            surface_type=surf_type,
+            surface_params=surf_params,
+            source_entity_id=None,
+            edge_count=edge_count,
+        )
+
         fid = next_id("f")
         face = TopologyFace(
             entity_id=fid,
             outer_wire_id=outer_wid,
             inner_wire_ids=tuple(inner_wids),
             orientation=_orient(shape.Orientation()),  # type: ignore[union-attr]
+            surface_signature=sig,
         )
         face_reg.append((shape, face))
         return fid

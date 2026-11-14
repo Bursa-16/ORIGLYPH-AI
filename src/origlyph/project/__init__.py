@@ -4,6 +4,13 @@ from .cad_source_bridge import (
     cad_source_reference_from_step,
     project_with_step_source,
 )
+from .datum_surface_validation import (
+    SUPPORTED_VALIDATION_ENTITY_KINDS,
+    DatumSurfaceValidationResult,
+    DatumSurfaceValidationStatus,
+    validate_datum_role_surface,
+    validate_datum_surface,
+)
 from .datum_topology_binding import (
     BINDING_FORMAT_VERSION,
     BINDING_FORMAT_VERSION_V2,
@@ -86,3 +93,6 @@ __all__ += ["decode_datum_topology_ref", "encode_datum_topology_ref"]
 __all__ += ["is_topology_binding", "resolve_datum_topology_bindings"]
 __all__ += ["FaceRevisionMatch", "RevisionMatchClass", "RevisionRemapResult"]
 __all__ += ["remap_all_face_bindings", "remap_face_binding"]
+__all__ += ["SUPPORTED_VALIDATION_ENTITY_KINDS"]
+__all__ += ["DatumSurfaceValidationStatus", "DatumSurfaceValidationResult"]
+__all__ += ["validate_datum_surface", "validate_datum_role_surface"]
